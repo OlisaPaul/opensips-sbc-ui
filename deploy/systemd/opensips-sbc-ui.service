@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenSIPS SBC UI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opensips-sbc-ui
+Group=opensips-sbc-ui
+WorkingDirectory=/opt/opensips-sbc-ui
+EnvironmentFile=/opt/opensips-sbc-ui/backend/.env
+ExecStart=/usr/bin/npm run start --workspace backend
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/opensips-sbc-ui
+
+[Install]
+WantedBy=multi-user.target

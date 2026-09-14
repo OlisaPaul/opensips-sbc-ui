@@ -21,7 +21,10 @@ export class MiService {
 
     try {
       const url = this.config.get<string>('MI_URL') ?? 'http://127.0.0.1:8888/mi';
-      const timeout = this.config.get<number>('MI_TIMEOUT_MS') ?? 3000;
+      const configuredTimeout = Number(this.config.get<string>('MI_TIMEOUT_MS') ?? 3000);
+      const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : 3000;
       const { body } = await request(url, {
         method: 'POST',
         body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: command, params }),

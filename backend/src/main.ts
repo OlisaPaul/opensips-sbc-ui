@@ -18,7 +18,10 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(config.get<number>('PORT') ?? 3000);
+  await app.listen(
+    config.get<number>('PORT') ?? 3000,
+    config.get<string>('BACKEND_HOST') ?? '127.0.0.1',
+  );
 }
 
 bootstrap();

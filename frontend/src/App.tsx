@@ -214,7 +214,9 @@ function StatusPanel({ status }: { status: unknown }) {
     <div className="panel">
       <div className="panelTitle"><RefreshCw size={18} /><h2>Live Status</h2></div>
       {!status && <p className="empty">Choose Status on a trunk to query OpenSIPS MI.</p>}
-      {status && <pre className="statusBox">{JSON.stringify(status, null, 2)}</pre>}
+      {status !== null && status !== undefined && (
+        <pre className="statusBox">{JSON.stringify(status, null, 2)}</pre>
+      )}
     </div>
   );
 }

@@ -1,10 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_HOST="${DB_HOST:-127.0.0.1}"
-DB_PORT="${DB_PORT:-3306}"
-DB_USER="${DB_USER:-opensips}"
-DB_NAME="${DB_NAME:-opensips}"
+db_host_value="${DB_HOST:-}"
+db_port_value="${DB_PORT:-}"
+db_user_value="${DB_USER:-}"
+db_password_value="${DB_PASSWORD:-}"
+db_name_value="${DB_NAME:-}"
+
+if [[ -n "${ENV_FILE:-}" ]]; then
+  if [[ ! -r "$ENV_FILE" ]]; then
+    echo "Cannot read ENV_FILE: $ENV_FILE"
+    exit 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    case "$key" in
+      DB_HOST) [[ -z "$db_host_value" ]] && db_host_value="$value" ;;
+      DB_PORT) [[ -z "$db_port_value" ]] && db_port_value="$value" ;;
+      DB_USER) [[ -z "$db_user_value" ]] && db_user_value="$value" ;;
+      DB_PASSWORD) [[ -z "$db_password_value" ]] && db_password_value="$value" ;;
+      DB_NAME) [[ -z "$db_name_value" ]] && db_name_value="$value" ;;
+    esac
+  done < "$ENV_FILE"
+fi
+
+DB_HOST="${db_host_value:-127.0.0.1}"
+DB_PORT="${db_port_value:-3306}"
+DB_USER="${db_user_value:-opensips}"
+DB_PASSWORD="$db_password_value"
+DB_NAME="${db_name_value:-opensips}"
 
 if [[ -z "${DB_PASSWORD:-}" ]]; then
   echo "Set DB_PASSWORD before running this check."

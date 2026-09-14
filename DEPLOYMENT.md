@@ -2,6 +2,12 @@
 
 This project includes an Ubuntu/Debian-oriented installer that runs the backend with systemd and exposes the UI over HTTPS with Nginx.
 
+Prerequisites:
+
+- Node.js 18, 20, or 22+ must be available from the configured package repositories.
+- For Let's Encrypt, the domain must resolve to this server and inbound ports 80 and 443 must be open.
+- The OpenSIPS database and the tables in `database/schema.sql` must already exist.
+
 ## Production With Let's Encrypt
 
 Run from the project root on the OpenSIPS/SBC host:
@@ -23,6 +29,8 @@ Then rerun:
 ```bash
 sudo DOMAIN=sbc.example.com EMAIL=admin@example.com bash scripts/install-https-nginx.sh
 ```
+
+The installer preserves `backend/.env` on subsequent deployments, validates the database schema, rebuilds both workspaces, and restarts the backend service.
 
 ## Private/Internal HTTPS
 
@@ -70,6 +78,8 @@ DB_PASSWORD='your-password' \
 DB_NAME=opensips \
 bash scripts/preflight-db.sh
 ```
+
+The installer runs this check automatically using the deployed `backend/.env`. For an initial web-server-only setup when the database is deliberately unavailable, set `SKIP_DB_PREFLIGHT=true`; run the preflight manually before using the application.
 
 ## Services
 

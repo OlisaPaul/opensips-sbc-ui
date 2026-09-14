@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=simple
 User=opensips-sbc-ui
 Group=opensips-sbc-ui
-WorkingDirectory=/opt/opensips-sbc-ui
-EnvironmentFile=/opt/opensips-sbc-ui/backend/.env
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/backend/.env
 ExecStart=/usr/bin/npm run start --workspace backend
 Restart=always
 RestartSec=5
@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/opensips-sbc-ui
+ReadWritePaths=__APP_DIR__
 
 [Install]
 WantedBy=multi-user.target

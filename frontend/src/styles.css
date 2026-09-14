@@ -84,6 +84,18 @@ button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 input, select { width: 100%; height: 41px; border: 1px solid #cbd6da; border-radius: 8px; padding: 8px 10px; color: #1e2c34; background: #fff; outline: none; }
 input:focus, select:focus { border-color: #169785; box-shadow: 0 0 0 3px #16978518; }
 .twoCols { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
+.segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 2px 0 14px; border-radius: 10px; background: #edf3f4; }
+.segmented button { min-height: 35px; border: 0; background: transparent; color: #6b7b83; font-size: 11px; box-shadow: none; }
+.segmented button:hover { transform: none; }
+.segmented button.active { color: #0d7167; background: #fff; box-shadow: 0 2px 7px #183b4517; }
+.setOptions { max-height: 170px; margin: -5px 0 10px; border: 1px solid #dbe3e6; border-radius: 9px; overflow-y: auto; }
+.setOptions button { width: 100%; min-height: 49px; border: 0; border-bottom: 1px solid #edf1f3; border-radius: 0; padding: 8px 11px; display: grid; justify-items: start; gap: 3px; text-align: left; }
+.setOptions button:last-of-type { border-bottom: 0; }.setOptions button:hover, .setOptions button.selected { transform: none; background: #edf9f6; }
+.setOptions button.selected { box-shadow: inset 3px 0 #18a28f; }.setOptions button b { color: #176f65; font-size: 11px; }.setOptions button span { max-width: 100%; color: #52636b; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setOptions p { padding: 14px; color: #7b898f; font-size: 11px; text-align: center; }
+.setPreview { display: grid; gap: 4px; padding: 11px 12px; margin-top: -4px; border: 1px solid #cfe5df; border-radius: 9px; background: #f0faf7; }
+.setPreview b { color: #126f63; font-size: 12px; }.setPreview span { color: #3f5159; font-size: 11px; }.setPreview small { color: #7b898f; font-size: 10px; }
+.setNotice { padding: 10px 12px; border-left: 3px solid #3c83c8; border-radius: 5px 8px 8px 5px; color: #53656f; background: #edf6fc; font-size: 11px; line-height: 1.5; }
 .switchRow { min-height: 56px; border: 1px solid #dbe3e6; border-radius: 9px; padding: 10px 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .switchRow span { display: grid; gap: 4px; }.switchRow b { font-size: 12px; }.switchRow small { color: #78868e; font-size: 10px; }
 .switchRow input { width: 38px; height: 20px; accent-color: #117f72; }

@@ -33,6 +33,18 @@ export type TrunkStatus = {
   provider: { ok: boolean; setId: number; destination: string; state: string; error?: string };
 };
 
+export type ProviderDispatcherSet = {
+  setId: number;
+  trunks: string[];
+  destinations: Array<{ destination: string; description: string; state: number }>;
+};
+
+export type ProviderDispatcherSets = {
+  sets: ProviderDispatcherSet[];
+  usedSetIds: number[];
+  nextSetId: number;
+};
+
 export type InboundRoute = {
   id: number;
   start_did: string;
@@ -128,6 +140,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
   trunkStatuses: () => request<TrunkStatus[]>('/api/trunks/statuses'),
+  providerSets: () => request<ProviderDispatcherSets>('/api/trunks/provider-sets'),
   status: (id: number) => request<TrunkStatus>(`/api/trunks/${id}/status`),
   listInboundRoutes: () => request<InboundRoute[]>('/api/inbound-routes'),
   createInboundRoute: (input: InboundRouteInput) =>

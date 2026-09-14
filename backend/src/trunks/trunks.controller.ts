@@ -20,6 +20,11 @@ export class TrunksController {
     return this.trunks.statuses();
   }
 
+  @Get('provider-sets')
+  providerSets() {
+    return this.trunks.providerSets();
+  }
+
   @Get(':id')
   get(@Param('id', ParseIntPipe) id: number) {
     return this.trunks.get(id);

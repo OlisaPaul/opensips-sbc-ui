@@ -8,6 +8,15 @@ import { CreateTrunkDto, UpdateTrunkDto } from './dto';
 import { Trunk } from './trunk.types';
 
 type TrunkRow = RowDataPacket & Trunk & { encrypted_password?: string };
+type DispatcherSetRow = RowDataPacket & {
+  setid: number;
+  destination: string;
+  description: string;
+  state: number;
+};
+type SetReferenceRow = RowDataPacket & { setid: number };
+type TrunkSetRow = RowDataPacket & { name: string; provider_dispatcher_set: number };
+type ProviderAddressRow = RowDataPacket & { ip: string };
 
 @Injectable()
 export class TrunksService {
@@ -43,6 +52,54 @@ export class TrunksService {
       this.mi.dispatcherStatus(),
     ]);
     return trunks.map((trunk) => this.buildStatus(trunk, registration, dispatcher));
+  }
+
+  async providerSets() {
+    const [dispatcherRows, trunkRows, prefixRows, inboundRows, providerAddresses] = await Promise.all([
+      this.database.query<DispatcherSetRow[]>(
+        'select setid, destination, description, state from dispatcher order by setid, id',
+      ),
+      this.database.query<TrunkSetRow[]>(
+        'select name, provider_dispatcher_set from sbc_trunks order by name',
+      ),
+      this.database.query<SetReferenceRow[]>(
+        'select distinct sipline_set_id as setid from prefix_mapping where sipline_set_id is not null',
+      ),
+      this.database.query<SetReferenceRow[]>(
+        'select distinct sipline_set_id as setid from did_provider_mapping where sipline_set_id is not null',
+      ),
+      this.database.query<ProviderAddressRow[]>(
+        'select distinct ip from address where grp = 1',
+      ),
+    ]);
+
+    const providerIps = new Set(providerAddresses.map((row) => row.ip));
+    const addressMatchedIds = dispatcherRows
+      .filter((row) => {
+        const host = row.destination.match(/^sips?:([^:;>]+)/i)?.[1];
+        return Boolean(host && providerIps.has(host));
+      })
+      .map((row) => Number(row.setid));
+    const providerIds = new Set<number>([
+      ...trunkRows.map((row) => Number(row.provider_dispatcher_set)),
+      ...prefixRows.map((row) => Number(row.setid)),
+      ...inboundRows.map((row) => Number(row.setid)),
+      ...addressMatchedIds,
+    ].filter((id) => Number.isInteger(id) && id > 0));
+    const allUsedIds = [...new Set(dispatcherRows.map((row) => Number(row.setid)))].sort((a, b) => a - b);
+    const referencedIds = [...providerIds].sort((a, b) => a - b);
+
+    return {
+      sets: referencedIds.map((setId) => ({
+        setId,
+        trunks: trunkRows.filter((row) => Number(row.provider_dispatcher_set) === setId).map((row) => row.name),
+        destinations: dispatcherRows
+          .filter((row) => Number(row.setid) === setId)
+          .map((row) => ({ destination: row.destination, description: row.description, state: row.state })),
+      })),
+      usedSetIds: allUsedIds,
+      nextSetId: Math.max(0, ...allUsedIds, ...referencedIds) + 1,
+    };
   }
 
   async create(input: CreateTrunkDto) {

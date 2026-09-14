@@ -5,15 +5,15 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
-  Trunk, TrunkInput, TrunkStatus,
+  ProviderDispatcherSets, Trunk, TrunkInput, TrunkStatus,
 } from './api/client';
 
 type Section = 'trunks' | 'inbound' | 'outbound';
 type Editor = { kind: Section; id?: number } | null;
 
-const newTrunk = (): TrunkInput => ({
+const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   name: '', providerIp: '', providerPort: 5060, username: '', password: '',
-  registrationEnabled: true, registrationServer: '', providerDispatcherSet: 9,
+  registrationEnabled: true, registrationServer: '', providerDispatcherSet,
 });
 
 const newInbound = (trunks: Trunk[]): InboundRouteInput => ({
@@ -38,6 +38,7 @@ export function App() {
   const [section, setSection] = useState<Section>('trunks');
   const [trunks, setTrunks] = useState<Trunk[]>([]);
   const [statuses, setStatuses] = useState<Record<number, TrunkStatus>>({});
+  const [providerSets, setProviderSets] = useState<ProviderDispatcherSets>({ sets: [], usedSetIds: [], nextSetId: 1 });
   const [inbound, setInbound] = useState<InboundRoute[]>([]);
   const [outbound, setOutbound] = useState<OutboundRoute[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
@@ -49,11 +50,12 @@ export function App() {
   const load = useCallback(async () => {
     setBusy(true); setError('');
     try {
-      const [trunkRows, statusRows, inboundRows, outboundRows] = await Promise.all([
-        api.listTrunks(), api.trunkStatuses(), api.listInboundRoutes(), api.listOutboundRoutes(),
+      const [trunkRows, statusRows, providerSetRows, inboundRows, outboundRows] = await Promise.all([
+        api.listTrunks(), api.trunkStatuses(), api.providerSets(), api.listInboundRoutes(), api.listOutboundRoutes(),
       ]);
       setTrunks(trunkRows);
       setStatuses(Object.fromEntries(statusRows.map((status) => [status.trunkId, status])));
+      setProviderSets(providerSetRows);
       setInbound(inboundRows); setOutbound(outboundRows);
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
@@ -121,7 +123,7 @@ export function App() {
         {section === 'outbound' && <OutboundList rows={outbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'outbound', id })} />}
       </main>
 
-      {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} onClose={() => setEditor(null)} onSaved={saved} />}
+      {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} providerSets={providerSets} onClose={() => setEditor(null)} onSaved={saved} />}
       {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
       {editor?.kind === 'outbound' && <OutboundEditor route={outbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
     </div>
@@ -215,12 +217,54 @@ function Drawer({ title, description, busy, error, onClose, onSubmit, children }
   return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="drawer"><header><div><h2>{title}</h2><p>{description}</p></div><button className="iconButton" type="button" onClick={onClose}><X size={20} /></button></header><form onSubmit={onSubmit}><div className="formBody">{children}{error && <div className="toast error">{error}</div>}</div><footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}><Save size={17} />{busy ? 'Saving…' : 'Save'}</button></footer></form></aside></div>;
 }
 
-function TrunkEditor({ trunk, onClose, onSaved }: { trunk?: Trunk; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
-  const [form, setForm] = useState<TrunkInput>(() => trunk ? trunkInput(trunk) : newTrunk()); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { trunk ? await api.updateTrunk(trunk.id, form) : await api.createTrunk(form); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk; providerSets: ProviderDispatcherSets; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
+  const [setMode, setSetMode] = useState<'existing' | 'new'>(trunk ? 'existing' : 'new');
+  const [setSearch, setSetSearch] = useState('');
+  const [form, setForm] = useState<TrunkInput>(() => trunk
+    ? trunkInput(trunk)
+    : newTrunk(providerSets.nextSetId));
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const selectedSet = providerSets.sets.find((item) => item.setId === form.providerDispatcherSet);
+  const visibleSets = providerSets.sets.filter((item) =>
+    `${item.setId} ${providerSetLabel(item)}`.toLowerCase().includes(setSearch.trim().toLowerCase()),
+  );
+  const selectMode = (mode: 'existing' | 'new') => {
+    setSetMode(mode);
+    setError('');
+    setForm({
+      ...form,
+      providerDispatcherSet: mode === 'new'
+        ? providerSets.nextSetId
+        : trunk?.provider_dispatcher_set ?? providerSets.sets[0]?.setId ?? 0,
+    });
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setError('');
+    const setAlreadyUsed = providerSets.usedSetIds.includes(form.providerDispatcherSet)
+      && form.providerDispatcherSet !== trunk?.provider_dispatcher_set;
+    if (setMode === 'new' && setAlreadyUsed) {
+      setError(`Set ${form.providerDispatcherSet} already exists. Choose “Use existing set” or enter an unused number.`);
+      return;
+    }
+    setBusy(true);
+    try { trunk ? await api.updateTrunk(trunk.id, form) : await api.createTrunk(form); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); }
+    catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(false); }
+  };
   return <Drawer title={trunk ? 'Edit trunk' : 'Add a new trunk'} description="Configure the SIP provider connection. Routes are managed separately." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
     <FormSection title="Identity"><Field label="Trunk name"><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="AdoGlobal" /></Field><Field label="SIP username / pilot"><input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="02013313100" /></Field></FormSection>
-    <FormSection title="Provider gateway"><div className="twoCols"><Field label="Provider IP"><input required value={form.providerIp} onChange={(e) => setForm({ ...form, providerIp: e.target.value })} placeholder="46.62.134.9" /></Field><Field label="Port"><input required type="number" min="1" max="65535" value={form.providerPort} onChange={(e) => setForm({ ...form, providerPort: Number(e.target.value) })} /></Field></div><Field label="Provider dispatcher set" hint="A unique OpenSIPS dispatcher set for this provider"><input required type="number" min="1" value={form.providerDispatcherSet} onChange={(e) => setForm({ ...form, providerDispatcherSet: Number(e.target.value) })} /></Field></FormSection>
+    <FormSection title="Provider gateway">
+      <div className="twoCols"><Field label="Provider IP"><input required value={form.providerIp} onChange={(e) => setForm({ ...form, providerIp: e.target.value })} placeholder="46.62.134.9" /></Field><Field label="Port"><input required type="number" min="1" max="65535" value={form.providerPort} onChange={(e) => setForm({ ...form, providerPort: Number(e.target.value) })} /></Field></div>
+      <div className="segmented" aria-label="Provider set mode"><button type="button" className={setMode === 'existing' ? 'active' : ''} disabled={!providerSets.sets.length} onClick={() => selectMode('existing')}>Use existing set</button><button type="button" className={setMode === 'new' ? 'active' : ''} onClick={() => selectMode('new')}>Create new set</button></div>
+      {setMode === 'existing' ? <>
+        <Field label="Search provider sets" hint="Search by set number, trunk name, provider name, or gateway."><input type="search" value={setSearch} onChange={(e) => setSetSearch(e.target.value)} placeholder="Search existing sets…" /></Field>
+        <div className="setOptions">{visibleSets.map((item) => <button type="button" className={item.setId === form.providerDispatcherSet ? 'selected' : ''} key={item.setId} onClick={() => setForm({ ...form, providerDispatcherSet: item.setId })}><b>Set {item.setId}</b><span>{providerSetLabel(item)}</span></button>)}{!visibleSets.length && <p>No matching provider sets.</p>}</div>
+        {selectedSet && <div className="setPreview"><b>Set {selectedSet.setId}</b><span>{providerSetLabel(selectedSet)}</span><small>{selectedSet.destinations.length} gateway{selectedSet.destinations.length === 1 ? '' : 's'} currently in this group</small></div>}
+      </> : <>
+        <Field label="New provider set number" hint={`Suggested next unused set: ${providerSets.nextSetId}`}><input required type="number" min="1" value={form.providerDispatcherSet} onChange={(e) => setForm({ ...form, providerDispatcherSet: Number(e.target.value) })} /></Field>
+        <div className="setNotice">The set is created when this trunk is saved. OpenSIPS does not need a separate empty set record.</div>
+      </>}
+    </FormSection>
     <FormSection title="Registration"><label className="switchRow"><span><b>Register with provider</b><small>OpenSIPS sends REGISTER requests for this trunk</small></span><input type="checkbox" checked={form.registrationEnabled} onChange={(e) => setForm({ ...form, registrationEnabled: e.target.checked })} /></label>{form.registrationEnabled && <><Field label={trunk ? 'Password (leave blank to keep current)' : 'Password'}><input required={!trunk} type="password" value={form.password ?? ''} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field><Field label="Registrar (optional)" hint="Defaults to the provider IP and port"><input value={form.registrationServer ?? ''} onChange={(e) => setForm({ ...form, registrationServer: e.target.value })} placeholder="sip:46.62.134.9:5060" /></Field></>}</FormSection>
   </Drawer>;
 }
@@ -252,6 +296,11 @@ function OutboundEditor({ route, trunks, onClose, onSaved }: { route?: OutboundR
 
 function FormSection({ title, children }: { title: string; children: ReactNode }) { return <section className="formSection"><h3>{title}</h3>{children}</section>; }
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>; }
+function providerSetLabel(set: ProviderDispatcherSets['sets'][number]) {
+  const names = set.trunks.length ? set.trunks.join(', ') : set.destinations.map((item) => item.description).filter(Boolean).join(', ');
+  const gateways = set.destinations.map((item) => item.destination.replace(/^sip:/, '')).join(', ');
+  return [names || 'Provider set', gateways].filter(Boolean).join(' — ');
+}
 function errorText(cause: unknown) { if (!(cause instanceof Error)) return 'Something went wrong.'; try { const parsed = JSON.parse(cause.message); return Array.isArray(parsed.message) ? parsed.message.join(' ') : parsed.message || cause.message; } catch { return cause.message; } }
 
 export default App;

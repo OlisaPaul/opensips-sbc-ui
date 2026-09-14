@@ -47,7 +47,7 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
    mysql -h 127.0.0.1 -u opensips -p opensips < database/schema.sql
    ```
 
-   Review the generated unique indexes first if your OpenSIPS tables already have conflicting duplicate rows.
+   This creates only `sbc_trunks` and `sbc_audit_log`. It does not alter existing OpenSIPS or custom routing tables.
 
 5. Run the backend:
 

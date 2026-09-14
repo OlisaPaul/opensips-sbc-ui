@@ -9,6 +9,14 @@ Prerequisites:
 - For Let's Encrypt, the domain must resolve to this server and inbound ports 80 and 443 must be open.
 - The OpenSIPS database and the tables in `database/schema.sql` must already exist.
 
+If the preflight reports that `sbc_trunks` or `sbc_audit_log` is missing, create only these app-owned tables once:
+
+```bash
+mariadb -h 127.0.0.1 -u opensips -p opensips < database/schema.sql
+```
+
+This schema file does not alter any existing OpenSIPS or custom routing table.
+
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 
 If a supported Node.js and npm installation already exists, including a NodeSource installation, the installer reuses it and does not ask DNF or APT to replace it.

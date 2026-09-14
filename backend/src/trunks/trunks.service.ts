@@ -188,21 +188,8 @@ export class TrunksService {
     await this.upsertDispatcher(providerSet, providerDestination, input.name, connection);
     await this.upsertDispatcher(applicationSet, applicationDestination, input.applicationName, connection);
 
-    await this.database.query(
-      `insert into address (grp, ip, mask, port, proto, pattern, context_info)
-       values (1, :ip, 32, :port, 'udp', :pattern, :contextInfo)
-       on duplicate key update port = values(port), pattern = values(pattern), context_info = values(context_info)`,
-      { ip: input.providerIp, port: input.providerPort, pattern: input.pilotCli, contextInfo: `trunk:${id}` },
-      connection,
-    );
-
-    await this.database.query(
-      `insert into address (grp, ip, mask, port, proto, pattern, context_info)
-       values (2, :ip, 32, :port, 'udp', :pattern, :contextInfo)
-       on duplicate key update port = values(port), pattern = values(pattern), context_info = values(context_info)`,
-      { ip: input.applicationIp, port: input.applicationPort, pattern: input.pilotCli, contextInfo: `trunk:${id}` },
-      connection,
-    );
+    await this.upsertAddress(1, input.providerIp, input.providerPort, input.pilotCli, id, connection);
+    await this.upsertAddress(2, input.applicationIp, input.applicationPort, input.pilotCli, id, connection);
 
     await this.upsertDidMapping(input.username, applicationSet, input.applicationName, connection);
 
@@ -260,12 +247,75 @@ export class TrunksService {
     );
   }
 
+  private async upsertAddress(
+    group: number,
+    ip: string,
+    port: number,
+    pattern: string,
+    trunkId: number,
+    connection: DbConnection,
+  ) {
+    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
+      `select id from address
+       where grp = :group and ip = :ip and proto = 'udp'
+       order by id
+       limit 1`,
+      { group, ip },
+      connection,
+    );
+    const params = {
+      group,
+      ip,
+      port,
+      pattern: pattern.slice(0, 64),
+      contextInfo: `trunk:${trunkId}`,
+    };
+
+    if (rows[0]) {
+      await this.database.query(
+        `update address
+         set mask = 32, port = :port, pattern = :pattern, context_info = :contextInfo
+         where grp = :group and ip = :ip and proto = 'udp'`,
+        params,
+        connection,
+      );
+      return;
+    }
+
+    await this.database.query(
+      `insert into address (grp, ip, mask, port, proto, pattern, context_info)
+       values (:group, :ip, 32, :port, 'udp', :pattern, :contextInfo)`,
+      params,
+      connection,
+    );
+  }
+
   private async upsertDispatcher(setid: number, destination: string, description: string, connection: DbConnection) {
+    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
+      `select id from dispatcher
+       where setid = :setid and destination = :destination
+       order by id
+       limit 1`,
+      { setid, destination },
+      connection,
+    );
+    const params = { setid, destination, description: description.slice(0, 64) };
+
+    if (rows[0]) {
+      await this.database.query(
+        `update dispatcher
+         set description = :description, state = 0
+         where setid = :setid and destination = :destination`,
+        params,
+        connection,
+      );
+      return;
+    }
+
     await this.database.query(
       `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
-       values (:setid, :destination, null, 0, 1, 0, '', :description)
-       on duplicate key update description = values(description), state = 0`,
-      { setid, destination, description },
+       values (:setid, :destination, null, 0, 1, 0, '', :description)`,
+      params,
       connection,
     );
   }

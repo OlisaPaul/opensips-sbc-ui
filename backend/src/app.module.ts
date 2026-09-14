@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AuditModule } from './audit/audit.module';
 import { DatabaseModule } from './database/database.module';
 import { MiModule } from './mi/mi.module';
+import { RoutingModule } from './routing/routing.module';
 import { TrunksModule } from './trunks/trunks.module';
 
 @Module({
@@ -11,6 +12,7 @@ import { TrunksModule } from './trunks/trunks.module';
     DatabaseModule,
     MiModule,
     AuditModule,
+    RoutingModule,
     TrunksModule,
   ],
 })

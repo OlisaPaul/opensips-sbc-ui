@@ -5,10 +5,8 @@ import { PlannedAction, ProvisionPlan } from './trunk.types';
 @Injectable()
 export class TrunkPlannerService {
   build(input: TrunkInputDto): ProvisionPlan {
-    const providerSet = input.providerDispatcherSet ?? 1;
-    const applicationSet = input.applicationDispatcherSet ?? 8;
+    const providerSet = input.providerDispatcherSet;
     const providerSocket = `sip:${input.providerIp}:${input.providerPort}`;
-    const applicationSocket = `sip:${input.applicationIp}:${input.applicationPort}`;
     const registrar = input.registrationServer?.trim() || providerSocket;
     const warnings: string[] = [];
 
@@ -20,7 +18,7 @@ export class TrunkPlannerService {
       {
         label: 'Save trunk metadata',
         sql: 'insert/update sbc_trunks',
-        params: this.safeParams(input, providerSet, applicationSet),
+        params: this.safeParams(input, providerSet),
       },
       {
         label: 'Provision provider dispatcher gateway',
@@ -30,38 +28,7 @@ export class TrunkPlannerService {
       {
         label: 'Authorize provider source address',
         sql: 'insert/update address(grp=1, ip, port, pattern)',
-        params: { grp: 1, ip: input.providerIp, port: input.providerPort, pattern: input.pilotCli },
-      },
-      {
-        label: 'Map DID to application dispatcher set',
-        sql: 'insert/update did_mapping(start_did, end_did, destination_set_id, description)',
-        params: {
-          start_did: input.username,
-          end_did: input.username,
-          destination_set_id: applicationSet,
-          description: input.applicationName,
-        },
-      },
-      {
-        label: 'Provision application dispatcher gateway',
-        sql: 'insert/update dispatcher(setid, destination, description)',
-        params: { setid: applicationSet, destination: applicationSocket, description: input.applicationName },
-      },
-      {
-        label: 'Authorize application/PBX source address',
-        sql: 'insert/update address(grp=2, ip, port, pattern)',
-        params: { grp: 2, ip: input.applicationIp, port: input.applicationPort, pattern: input.pilotCli },
-      },
-      {
-        label: 'Map outbound prefix to provider dispatcher set',
-        sql: 'insert/update prefix_mapping(prefix, sipline_set_id, description, routing_mode, strip_prefix)',
-        params: {
-          prefix: input.accessPrefix,
-          strip_prefix: input.stripPrefix,
-          sipline_set_id: providerSet,
-          description: input.name,
-          routing_mode: 'dial_prefix',
-        },
+        params: { grp: 1, ip: input.providerIp, port: input.providerPort, pattern: input.username },
       },
       {
         label: 'Reload OpenSIPS address and dispatcher data',
@@ -85,16 +52,16 @@ export class TrunkPlannerService {
     return {
       summary: [
         `${input.name}: ${input.username} via ${providerSocket}`,
-        `Inbound ${input.username} -> ${input.applicationName} (${applicationSocket})`,
-        `Outbound ${input.accessPrefix} -> dispatcher set ${providerSet}`,
+        `Provider dispatcher set ${providerSet}`,
+        'Inbound and outbound routes are managed separately.',
       ],
       actions,
       warnings,
     };
   }
 
-  private safeParams(input: TrunkInputDto, providerSet: number, applicationSet: number) {
+  private safeParams(input: TrunkInputDto, providerSet: number) {
     const { password: _password, ...safe } = input;
-    return { ...safe, providerDispatcherSet: providerSet, applicationDispatcherSet: applicationSet };
+    return { ...safe, providerDispatcherSet: providerSet };
   }
 }

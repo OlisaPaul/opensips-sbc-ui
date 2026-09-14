@@ -1,222 +1,257 @@
-import { Activity, CheckCircle2, ClipboardList, Plus, RadioTower, RefreshCw, Save } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api, ProvisionPlan, Trunk, TrunkInput } from './api/client';
+import {
+  Activity, ArrowDownToLine, ArrowUpFromLine, ChevronRight, CircleDot,
+  Network, Plus, RadioTower, RefreshCw, Save, Server, X,
+} from 'lucide-react';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  api, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
+  Trunk, TrunkInput, TrunkStatus,
+} from './api/client';
 
-const blankTrunk: TrunkInput = {
-  name: 'AdoGlobal',
-  providerIp: '46.62.134.9',
-  providerPort: 5060,
-  username: '02013313100',
-  password: '',
-  registrationEnabled: true,
-  registrationServer: '',
-  applicationName: 'Voice1',
-  applicationIp: '10.82.1.12',
-  applicationPort: 5060,
-  accessPrefix: '999',
-  stripPrefix: true,
-  pilotCli: '02013313100',
-  providerDispatcherSet: 1,
-  applicationDispatcherSet: 8,
-};
+type Section = 'trunks' | 'inbound' | 'outbound';
+type Editor = { kind: Section; id?: number } | null;
 
-function fromTrunk(trunk: Trunk): TrunkInput {
+const newTrunk = (): TrunkInput => ({
+  name: '', providerIp: '', providerPort: 5060, username: '', password: '',
+  registrationEnabled: true, registrationServer: '', providerDispatcherSet: 9,
+});
+
+const newInbound = (trunks: Trunk[]): InboundRouteInput => ({
+  startDid: '', endDid: '', trunkId: trunks[0]?.id ?? 0, applicationName: '',
+  applicationIp: '', applicationPort: 5060, destinationSetId: 8, description: '',
+});
+
+const newOutbound = (trunks: Trunk[]): OutboundRouteInput => ({
+  prefix: '', trunkId: trunks[0]?.id ?? 0, pilotCli: trunks[0]?.username ?? '',
+  stripPrefix: true, routingMode: 'dial_prefix', description: '',
+});
+
+function trunkInput(trunk: Trunk): TrunkInput {
   return {
-    name: trunk.name,
-    providerIp: trunk.provider_ip,
-    providerPort: trunk.provider_port,
-    username: trunk.username,
-    password: '',
-    registrationEnabled: trunk.registration_enabled,
-    registrationServer: trunk.registration_server ?? '',
-    applicationName: trunk.application_name,
-    applicationIp: trunk.application_ip,
-    applicationPort: trunk.application_port,
-    accessPrefix: trunk.access_prefix,
-    stripPrefix: trunk.strip_prefix,
-    pilotCli: trunk.pilot_cli,
-    providerDispatcherSet: trunk.provider_dispatcher_set,
-    applicationDispatcherSet: trunk.application_dispatcher_set,
+    name: trunk.name, providerIp: trunk.provider_ip, providerPort: trunk.provider_port,
+    username: trunk.username, password: '', registrationEnabled: trunk.registration_enabled,
+    registrationServer: trunk.registration_server ?? '', providerDispatcherSet: trunk.provider_dispatcher_set,
   };
 }
 
 export function App() {
+  const [section, setSection] = useState<Section>('trunks');
   const [trunks, setTrunks] = useState<Trunk[]>([]);
-  const [selected, setSelected] = useState<Trunk | null>(null);
-  const [form, setForm] = useState<TrunkInput>(blankTrunk);
-  const [plan, setPlan] = useState<ProvisionPlan | null>(null);
-  const [status, setStatus] = useState<unknown>(null);
+  const [statuses, setStatuses] = useState<Record<number, TrunkStatus>>({});
+  const [inbound, setInbound] = useState<InboundRoute[]>([]);
+  const [outbound, setOutbound] = useState<OutboundRoute[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [editor, setEditor] = useState<Editor>(null);
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  async function refresh() {
-    setTrunks(await api.listTrunks());
-  }
-
-  useEffect(() => {
-    refresh().catch((error) => setMessage(error.message));
+  const load = useCallback(async () => {
+    setBusy(true); setError('');
+    try {
+      const [trunkRows, statusRows, inboundRows, outboundRows] = await Promise.all([
+        api.listTrunks(), api.trunkStatuses(), api.listInboundRoutes(), api.listOutboundRoutes(),
+      ]);
+      setTrunks(trunkRows);
+      setStatuses(Object.fromEntries(statusRows.map((status) => [status.trunkId, status])));
+      setInbound(inboundRows); setOutbound(outboundRows);
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(false); }
   }, []);
 
-  const dashboard = useMemo(
-    () =>
-      trunks.map((trunk) => ({
-        trunk,
-        inbound: `${trunk.username} -> ${trunk.application_name} (${trunk.application_ip}:${trunk.application_port})`,
-        outbound: `${trunk.access_prefix} -> ${trunk.name}`,
-      })),
-    [trunks],
-  );
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setSelected(null); }, [section]);
 
-  function update<K extends keyof TrunkInput>(key: K, value: TrunkInput[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
-    setPlan(null);
-  }
+  const title = section === 'trunks' ? 'SIP Trunks' : section === 'inbound' ? 'Inbound Routing' : 'Outbound Routing';
+  const subtitle = section === 'trunks'
+    ? 'Manage provider connections and monitor their live OpenSIPS status.'
+    : section === 'inbound'
+      ? 'Route incoming DIDs from a provider trunk to an application server.'
+      : 'Send dialled prefixes through the correct provider trunk.';
 
-  function edit(trunk: Trunk) {
-    setSelected(trunk);
-    setForm(fromTrunk(trunk));
-    setPlan(null);
-    setStatus(null);
-  }
-
-  async function preview(event: FormEvent) {
-    event.preventDefault();
-    setPlan(await api.previewTrunk(form));
-    setMessage('Preview ready. Review the actions before saving.');
-  }
-
-  async function save() {
-    if (selected) {
-      await api.updateTrunk(selected.id, form);
-    } else {
-      await api.createTrunk(form);
-    }
-    setMessage('Trunk saved and OpenSIPS reload requested.');
-    setSelected(null);
-    setForm(blankTrunk);
-    setPlan(null);
-    await refresh();
-  }
-
-  async function checkStatus(trunk: Trunk) {
-    setSelected(trunk);
-    setStatus(await api.status(trunk.id));
-  }
+  const saved = async (text: string) => {
+    setMessage(text); setEditor(null); await load();
+    window.setTimeout(() => setMessage(''), 4000);
+  };
 
   return (
-    <main>
-      <header className="topbar">
-        <div>
-          <h1>OpenSIPS SBC</h1>
-          <p>Trunks, registrations, routing, and reload checks.</p>
-        </div>
-        <button type="button" onClick={() => { setSelected(null); setForm(blankTrunk); setPlan(null); }}>
-          <Plus size={18} /> Add trunk
-        </button>
-      </header>
+    <div className="appShell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brandMark"><RadioTower size={22} /></span><span>OpenSIPS<br /><small>SBC Console</small></span></div>
+        <nav>
+          <Nav active={section === 'trunks'} icon={<Network />} label="SIP Trunks" count={trunks.length} onClick={() => setSection('trunks')} />
+          <Nav active={section === 'inbound'} icon={<ArrowDownToLine />} label="Inbound Routing" count={inbound.length} onClick={() => setSection('inbound')} />
+          <Nav active={section === 'outbound'} icon={<ArrowUpFromLine />} label="Outbound Routing" count={outbound.length} onClick={() => setSection('outbound')} />
+        </nav>
+        <div className="sidebarFoot"><CircleDot size={14} /> OpenSIPS provisioning</div>
+      </aside>
 
-      {message && <div className="notice">{message}</div>}
-
-      <section className="layout">
-        <div className="panel">
-          <div className="panelTitle">
-            <RadioTower size={18} />
-            <h2>Trunks Dashboard</h2>
+      <main className="workspace">
+        <header className="pageHeader">
+          <div><p className="eyebrow">CONFIGURATION</p><h1>{title}</h1><p>{subtitle}</p></div>
+          <div className="headerActions">
+            <button className="iconButton" title="Refresh data" disabled={busy} onClick={() => void load()}><RefreshCw className={busy ? 'spin' : ''} size={18} /></button>
+            <button className="primary" onClick={() => setEditor({ kind: section })}><Plus size={18} /> Add {section === 'trunks' ? 'trunk' : 'route'}</button>
           </div>
-          <div className="trunkList">
-            {dashboard.map(({ trunk, inbound, outbound }) => (
-              <article className="trunkCard" key={trunk.id}>
-                <div>
-                  <h3>{trunk.name}</h3>
-                  <p>{trunk.provider_ip}:{trunk.provider_port}</p>
-                </div>
-                <div className="statusLine"><CheckCircle2 size={16} /> REGISTER {trunk.registration_enabled ? 'enabled' : 'off'}</div>
-                <div className="routeText">Inbound: {inbound}</div>
-                <div className="routeText">Outbound: {outbound}</div>
-                <div className="actions">
-                  <button type="button" onClick={() => edit(trunk)}>Edit</button>
-                  <button type="button" onClick={() => checkStatus(trunk)}><RefreshCw size={16} /> Status</button>
-                </div>
-              </article>
-            ))}
-            {trunks.length === 0 && <p className="empty">No trunks provisioned yet.</p>}
-          </div>
-        </div>
+        </header>
 
-        <form className="panel formPanel" onSubmit={preview}>
-          <div className="panelTitle">
-            <ClipboardList size={18} />
-            <h2>{selected ? `Edit ${selected.name}` : 'Add Trunk'}</h2>
-          </div>
+        {message && <div className="toast success">{message}</div>}
+        {error && <div className="toast error">{error}</div>}
 
-          <fieldset>
-            <legend>Provider</legend>
-            <label>Name<input value={form.name} onChange={(e) => update('name', e.target.value)} required /></label>
-            <label>Provider IP<input value={form.providerIp} onChange={(e) => update('providerIp', e.target.value)} required /></label>
-            <label>Provider port<input type="number" value={form.providerPort} onChange={(e) => update('providerPort', Number(e.target.value))} required /></label>
-            <label>Username / DID<input value={form.username} onChange={(e) => update('username', e.target.value)} required /></label>
-            <label>Password<input type="password" value={form.password} onChange={(e) => update('password', e.target.value)} placeholder={selected ? 'Leave blank to keep current' : ''} /></label>
-            <label>Registration server<input value={form.registrationServer} onChange={(e) => update('registrationServer', e.target.value)} placeholder="Defaults to provider socket" /></label>
-            <label className="check"><input type="checkbox" checked={form.registrationEnabled} onChange={(e) => update('registrationEnabled', e.target.checked)} /> Registration enabled</label>
-          </fieldset>
+        <section className="metrics">
+          {section === 'trunks' && <>
+            <Metric label="Total trunks" value={trunks.length} />
+            <Metric label="Providers active" value={Object.values(statuses).filter((item) => item.provider.ok).length} tone="green" />
+            <Metric label="Registered" value={Object.values(statuses).filter((item) => item.registration.ok && item.registration.enabled).length} tone="blue" />
+          </>}
+          {section === 'inbound' && <>
+            <Metric label="Inbound routes" value={inbound.length} />
+            <Metric label="DID ranges" value={inbound.filter((route) => route.end_did !== route.start_did).length} tone="blue" />
+            <Metric label="Application sets" value={new Set(inbound.map((route) => route.destination_set_id)).size} tone="green" />
+          </>}
+          {section === 'outbound' && <>
+            <Metric label="Outbound routes" value={outbound.length} />
+            <Metric label="Provider trunks" value={new Set(outbound.map((route) => route.trunk_id).filter(Boolean)).size} tone="blue" />
+            <Metric label="Strip prefix" value={outbound.filter((route) => route.strip_prefix).length} tone="green" />
+          </>}
+        </section>
 
-          <fieldset>
-            <legend>Inbound</legend>
-            <label>Application<input value={form.applicationName} onChange={(e) => update('applicationName', e.target.value)} required /></label>
-            <label>Application IP<input value={form.applicationIp} onChange={(e) => update('applicationIp', e.target.value)} required /></label>
-            <label>Application port<input type="number" value={form.applicationPort} onChange={(e) => update('applicationPort', Number(e.target.value))} required /></label>
-          </fieldset>
+        {section === 'trunks' && <TrunkList rows={trunks} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'trunks', id })} />}
+        {section === 'inbound' && <InboundList rows={inbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'inbound', id })} />}
+        {section === 'outbound' && <OutboundList rows={outbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'outbound', id })} />}
+      </main>
 
-          <fieldset>
-            <legend>Outbound</legend>
-            <label>Access prefix<input value={form.accessPrefix} onChange={(e) => update('accessPrefix', e.target.value)} required /></label>
-            <label>Pilot CLI<input value={form.pilotCli} onChange={(e) => update('pilotCli', e.target.value)} required /></label>
-            <label>Provider set<input type="number" value={form.providerDispatcherSet} onChange={(e) => update('providerDispatcherSet', Number(e.target.value))} /></label>
-            <label>Application set<input type="number" value={form.applicationDispatcherSet} onChange={(e) => update('applicationDispatcherSet', Number(e.target.value))} /></label>
-            <label className="check"><input type="checkbox" checked={form.stripPrefix} onChange={(e) => update('stripPrefix', e.target.checked)} /> Strip prefix</label>
-          </fieldset>
-
-          <div className="formActions">
-            <button type="submit"><Activity size={16} /> Preview</button>
-            <button type="button" className="primary" onClick={save} disabled={!plan}><Save size={16} /> Save trunk</button>
-          </div>
-        </form>
-      </section>
-
-      <section className="bottomGrid">
-        <PlanPanel plan={plan} />
-        <StatusPanel status={status} />
-      </section>
-    </main>
-  );
-}
-
-function PlanPanel({ plan }: { plan: ProvisionPlan | null }) {
-  return (
-    <div className="panel">
-      <div className="panelTitle"><Activity size={18} /><h2>Dry-run Preview</h2></div>
-      {!plan && <p className="empty">Submit the form to preview SQL and MI actions.</p>}
-      {plan?.warnings.map((warning) => <div className="warning" key={warning}>{warning}</div>)}
-      {plan?.summary.map((item) => <p className="summary" key={item}>{item}</p>)}
-      {plan?.actions.map((action) => (
-        <article className="actionCard" key={action.label}>
-          <strong>{action.label}</strong>
-          {action.sql && <code>{action.sql}</code>}
-          {action.mi && <code>MI: {action.mi}</code>}
-          {action.params && <pre>{JSON.stringify(action.params, null, 2)}</pre>}
-        </article>
-      ))}
+      {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} onClose={() => setEditor(null)} onSaved={saved} />}
+      {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
+      {editor?.kind === 'outbound' && <OutboundEditor route={outbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
     </div>
   );
 }
 
-function StatusPanel({ status }: { status: unknown }) {
-  return (
-    <div className="panel">
-      <div className="panelTitle"><RefreshCw size={18} /><h2>Live Status</h2></div>
-      {!status && <p className="empty">Choose Status on a trunk to query OpenSIPS MI.</p>}
-      {status !== null && status !== undefined && (
-        <pre className="statusBox">{JSON.stringify(status, null, 2)}</pre>
-      )}
-    </div>
-  );
+function Nav({ active, icon, label, count, onClick }: { active: boolean; icon: ReactNode; label: string; count: number; onClick: () => void }) {
+  return <button className={`navItem ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span><b>{count}</b></button>;
 }
+
+function Metric({ label, value, tone = '' }: { label: string; value: number; tone?: string }) {
+  return <div className={`metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function StatusPill({ ok, text }: { ok: boolean; text: string }) {
+  return <span className={`statusPill ${ok ? 'ok' : 'warn'}`}><i />{text}</span>;
+}
+
+function Empty({ text }: { text: string }) {
+  return <div className="emptyState"><Server size={34} /><h3>Nothing here yet</h3><p>{text}</p></div>;
+}
+
+function TrunkList({ rows, statuses, selected, onSelect, onEdit }: { rows: Trunk[]; statuses: Record<number, TrunkStatus>; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void }) {
+  if (!rows.length) return <Empty text="Add your first provider trunk to begin." />;
+  return <div className="contentGrid"><div className="dataPanel"><div className="tableHead"><span>Trunk</span><span>Provider</span><span>Registration</span><span>Gateway</span><span /></div>{rows.map((trunk) => {
+    const status = statuses[trunk.id];
+    return <button className={`dataRow trunkRow ${selected === trunk.id ? 'selected' : ''}`} key={trunk.id} onClick={() => onSelect(trunk.id)}>
+      <span className="primaryCell"><b>{trunk.name}</b><small>{trunk.username}</small></span>
+      <span><code>{trunk.provider_ip}:{trunk.provider_port}</code><small>Set {trunk.provider_dispatcher_set}</small></span>
+      <StatusPill ok={status?.registration.ok ?? false} text={status?.registration.state ?? 'Checking'} />
+      <StatusPill ok={status?.provider.ok ?? false} text={status?.provider.state ?? 'Checking'} />
+      <ChevronRight size={18} />
+    </button>;
+  })}</div>{selected && <TrunkDetail trunk={rows.find((row) => row.id === selected)!} status={statuses[selected]} onEdit={() => onEdit(selected)} />}</div>;
+}
+
+function TrunkDetail({ trunk, status, onEdit }: { trunk: Trunk; status?: TrunkStatus; onEdit: () => void }) {
+  return <Detail title={trunk.name} subtitle="Provider trunk" onEdit={onEdit}>
+    <DetailRow label="Provider address" value={`${trunk.provider_ip}:${trunk.provider_port}`} />
+    <DetailRow label="Provider set" value={trunk.provider_dispatcher_set} />
+    <DetailRow label="SIP username" value={trunk.username} />
+    <DetailRow label="Registration" value={status?.registration.state ?? 'Unknown'} />
+    <DetailRow label="Gateway" value={status?.provider.state ?? 'Unknown'} />
+    {status?.registration.error && <p className="inlineError">{status.registration.error}</p>}
+  </Detail>;
+}
+
+function InboundList({ rows, selected, onSelect, onEdit }: { rows: InboundRoute[]; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void }) {
+  if (!rows.length) return <Empty text="Add an inbound route to send a DID to an application server." />;
+  return <div className="contentGrid"><div className="dataPanel"><div className="tableHead inboundHead"><span>Inbound ID / DID</span><span>From trunk</span><span>Destination server</span><span /></div>{rows.map((route) => <button className={`dataRow inboundRow ${selected === route.id ? 'selected' : ''}`} key={route.id} onClick={() => onSelect(route.id)}>
+    <span className="primaryCell"><b>{route.start_did}{route.end_did !== route.start_did ? ` – ${route.end_did}` : ''}</b><small>Route #{route.id}</small></span>
+    <span><b>{route.trunk_name}</b><small>Provider set {route.provider_set_id ?? '—'}</small></span>
+    <span><code>{route.application_destination ?? 'Not provisioned'}</code><small>{route.application_name} · Set {route.destination_set_id}</small></span><ChevronRight size={18} />
+  </button>)}</div>{selected && <InboundDetail route={rows.find((row) => row.id === selected)!} onEdit={() => onEdit(selected)} />}</div>;
+}
+
+function InboundDetail({ route, onEdit }: { route: InboundRoute; onEdit: () => void }) {
+  return <Detail title={route.start_did} subtitle="Inbound call route" onEdit={onEdit}>
+    <div className="routeFlow"><span>{route.trunk_name}</span><ArrowDownToLine size={18} /><span>{route.application_name}</span></div>
+    <DetailRow label="End DID" value={route.end_did} /><DetailRow label="Provider set" value={route.provider_set_id ?? 'Unassigned'} />
+    <DetailRow label="Application" value={route.application_destination ?? 'Not provisioned'} /><DetailRow label="Destination set" value={route.destination_set_id} />
+    <DetailRow label="Description" value={route.description || '—'} />
+  </Detail>;
+}
+
+function OutboundList({ rows, selected, onSelect, onEdit }: { rows: OutboundRoute[]; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void }) {
+  if (!rows.length) return <Empty text="Add an outbound prefix and select the trunk that should carry it." />;
+  return <div className="contentGrid"><div className="dataPanel"><div className="tableHead outboundHead"><span>Dial prefix</span><span>Provider trunk</span><span>Routing</span><span /></div>{rows.map((route) => <button className={`dataRow outboundRow ${selected === route.id ? 'selected' : ''}`} key={route.id} onClick={() => onSelect(route.id)}>
+    <span className="prefixBadge">{route.prefix}</span><span className="primaryCell"><b>{route.trunk_name}</b><small>{route.provider_destination ?? `Set ${route.sipline_set_id}`}</small></span>
+    <span><b>{route.strip_prefix ? 'Strip prefix' : 'Keep prefix'}</b><small>{route.routing_mode.replace('_', ' ')}</small></span><ChevronRight size={18} />
+  </button>)}</div>{selected && <OutboundDetail route={rows.find((row) => row.id === selected)!} onEdit={() => onEdit(selected)} />}</div>;
+}
+
+function OutboundDetail({ route, onEdit }: { route: OutboundRoute; onEdit: () => void }) {
+  return <Detail title={route.prefix} subtitle="Outbound dial prefix" onEdit={onEdit}>
+    <DetailRow label="Provider trunk" value={route.trunk_name} /><DetailRow label="Provider destination" value={route.provider_destination ?? 'Not provisioned'} />
+    <DetailRow label="Provider set" value={route.sipline_set_id} /><DetailRow label="Pilot CLI" value={route.pilot_cli ?? '—'} />
+    <DetailRow label="Prefix handling" value={route.strip_prefix ? 'Strip before sending' : 'Keep in called number'} /><DetailRow label="Description" value={route.description || '—'} />
+  </Detail>;
+}
+
+function Detail({ title, subtitle, onEdit, children }: { title: string; subtitle: string; onEdit: () => void; children: ReactNode }) {
+  return <aside className="detailPanel"><div className="detailTop"><span className="detailIcon"><Activity size={20} /></span><div><h2>{title}</h2><p>{subtitle}</p></div></div><div className="detailBody">{children}</div><button onClick={onEdit}>Edit configuration</button></aside>;
+}
+
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
+  return <div className="detailRow"><span>{label}</span><b>{value}</b></div>;
+}
+
+function Drawer({ title, description, busy, error, onClose, onSubmit, children }: { title: string; description: string; busy: boolean; error: string; onClose: () => void; onSubmit: (event: FormEvent) => void; children: ReactNode }) {
+  return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="drawer"><header><div><h2>{title}</h2><p>{description}</p></div><button className="iconButton" type="button" onClick={onClose}><X size={20} /></button></header><form onSubmit={onSubmit}><div className="formBody">{children}{error && <div className="toast error">{error}</div>}</div><footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy}><Save size={17} />{busy ? 'Saving…' : 'Save'}</button></footer></form></aside></div>;
+}
+
+function TrunkEditor({ trunk, onClose, onSaved }: { trunk?: Trunk; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
+  const [form, setForm] = useState<TrunkInput>(() => trunk ? trunkInput(trunk) : newTrunk()); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { trunk ? await api.updateTrunk(trunk.id, form) : await api.createTrunk(form); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  return <Drawer title={trunk ? 'Edit trunk' : 'Add a new trunk'} description="Configure the SIP provider connection. Routes are managed separately." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
+    <FormSection title="Identity"><Field label="Trunk name"><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="AdoGlobal" /></Field><Field label="SIP username / pilot"><input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="02013313100" /></Field></FormSection>
+    <FormSection title="Provider gateway"><div className="twoCols"><Field label="Provider IP"><input required value={form.providerIp} onChange={(e) => setForm({ ...form, providerIp: e.target.value })} placeholder="46.62.134.9" /></Field><Field label="Port"><input required type="number" min="1" max="65535" value={form.providerPort} onChange={(e) => setForm({ ...form, providerPort: Number(e.target.value) })} /></Field></div><Field label="Provider dispatcher set" hint="A unique OpenSIPS dispatcher set for this provider"><input required type="number" min="1" value={form.providerDispatcherSet} onChange={(e) => setForm({ ...form, providerDispatcherSet: Number(e.target.value) })} /></Field></FormSection>
+    <FormSection title="Registration"><label className="switchRow"><span><b>Register with provider</b><small>OpenSIPS sends REGISTER requests for this trunk</small></span><input type="checkbox" checked={form.registrationEnabled} onChange={(e) => setForm({ ...form, registrationEnabled: e.target.checked })} /></label>{form.registrationEnabled && <><Field label={trunk ? 'Password (leave blank to keep current)' : 'Password'}><input required={!trunk} type="password" value={form.password ?? ''} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field><Field label="Registrar (optional)" hint="Defaults to the provider IP and port"><input value={form.registrationServer ?? ''} onChange={(e) => setForm({ ...form, registrationServer: e.target.value })} placeholder="sip:46.62.134.9:5060" /></Field></>}</FormSection>
+  </Drawer>;
+}
+
+function InboundEditor({ route, trunks, onClose, onSaved }: { route?: InboundRoute; trunks: Trunk[]; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
+  const initial = useMemo<InboundRouteInput>(() => route ? { startDid: route.start_did, endDid: route.end_did, trunkId: route.trunk_id ?? trunks[0]?.id ?? 0, applicationName: route.application_name, applicationIp: route.application_ip ?? '', applicationPort: route.application_port ?? 5060, destinationSetId: route.destination_set_id, description: route.description ?? '' } : newInbound(trunks), [route, trunks]);
+  const [form, setForm] = useState(initial); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { route ? await api.updateInboundRoute(route.id, form) : await api.createInboundRoute(form); await onSaved(route ? 'Inbound route updated.' : 'Inbound route added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  return <Drawer title={route ? 'Edit inbound route' : 'Add inbound route'} description="Define which incoming number goes from a provider trunk to an application." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
+    {!trunks.length && <div className="toast error">Add a trunk before creating a route.</div>}
+    <FormSection title="Incoming call"><div className="twoCols"><Field label="Start DID"><input required value={form.startDid} onChange={(e) => setForm({ ...form, startDid: e.target.value })} placeholder="02013313100" /></Field><Field label="End DID (optional)"><input value={form.endDid ?? ''} onChange={(e) => setForm({ ...form, endDid: e.target.value })} placeholder="Same as start DID" /></Field></div><Field label="Incoming provider trunk"><select required value={form.trunkId} onChange={(e) => setForm({ ...form, trunkId: Number(e.target.value) })}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — set {item.provider_dispatcher_set}</option>)}</select></Field></FormSection>
+    <FormSection title="Destination application"><Field label="Server name"><input required value={form.applicationName} onChange={(e) => setForm({ ...form, applicationName: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input required value={form.applicationIp} onChange={(e) => setForm({ ...form, applicationIp: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input required type="number" min="1" max="65535" value={form.applicationPort} onChange={(e) => setForm({ ...form, applicationPort: Number(e.target.value) })} /></Field></div><Field label="Destination dispatcher set"><input required type="number" min="1" value={form.destinationSetId} onChange={(e) => setForm({ ...form, destinationSetId: Number(e.target.value) })} /></Field></FormSection>
+    <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
+  </Drawer>;
+}
+
+function OutboundEditor({ route, trunks, onClose, onSaved }: { route?: OutboundRoute; trunks: Trunk[]; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
+  const initial = useMemo<OutboundRouteInput>(() => route ? { prefix: route.prefix, trunkId: route.trunk_id ?? trunks[0]?.id ?? 0, pilotCli: route.pilot_cli ?? trunks.find((item) => item.id === route.trunk_id)?.username ?? '', stripPrefix: route.strip_prefix, routingMode: 'dial_prefix', description: route.description ?? '' } : newOutbound(trunks), [route, trunks]);
+  const [form, setForm] = useState(initial); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const pickTrunk = (id: number) => setForm({ ...form, trunkId: id, pilotCli: trunks.find((item) => item.id === id)?.username ?? form.pilotCli });
+  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { route ? await api.updateOutboundRoute(route.id, form) : await api.createOutboundRoute(form); await onSaved(route ? 'Outbound route updated.' : 'Outbound route added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  return <Drawer title={route ? 'Edit outbound route' : 'Add outbound route'} description="Choose the access prefix and the provider trunk that will carry the call." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
+    {!trunks.length && <div className="toast error">Add a trunk before creating a route.</div>}
+    <FormSection title="Dial rule"><Field label="Dial prefix" hint="Digits users dial before the destination number"><input required value={form.prefix} onChange={(e) => setForm({ ...form, prefix: e.target.value })} placeholder="999" /></Field><label className="switchRow"><span><b>Strip prefix</b><small>Remove the access prefix before sending the call</small></span><input type="checkbox" checked={form.stripPrefix} onChange={(e) => setForm({ ...form, stripPrefix: e.target.checked })} /></label></FormSection>
+    <FormSection title="Provider"><Field label="Outbound trunk"><select required value={form.trunkId} onChange={(e) => pickTrunk(Number(e.target.value))}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.provider_ip}</option>)}</select></Field><Field label="Pilot CLI" hint="Caller ID authorized for this provider"><input required value={form.pilotCli} onChange={(e) => setForm({ ...form, pilotCli: e.target.value })} /></Field></FormSection>
+    <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
+  </Drawer>;
+}
+
+function FormSection({ title, children }: { title: string; children: ReactNode }) { return <section className="formSection"><h3>{title}</h3>{children}</section>; }
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>; }
+function errorText(cause: unknown) { if (!(cause instanceof Error)) return 'Something went wrong.'; try { const parsed = JSON.parse(cause.message); return Array.isArray(parsed.message) ? parsed.message.join(' ') : parsed.message || cause.message; } catch { return cause.message; } }
+
+export default App;

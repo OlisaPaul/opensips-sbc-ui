@@ -6,14 +6,7 @@ export type TrunkInput = {
   password?: string;
   registrationEnabled: boolean;
   registrationServer?: string;
-  applicationName: string;
-  applicationIp: string;
-  applicationPort: number;
-  accessPrefix: string;
-  stripPrefix: boolean;
-  pilotCli: string;
-  providerDispatcherSet?: number;
-  applicationDispatcherSet?: number;
+  providerDispatcherSet: number;
 };
 
 export type Trunk = {
@@ -24,14 +17,68 @@ export type Trunk = {
   username: string;
   registration_server: string | null;
   registration_enabled: boolean;
-  application_name: string;
-  application_ip: string;
-  application_port: number;
-  access_prefix: string;
-  strip_prefix: boolean;
-  pilot_cli: string;
+  application_name: string | null;
+  application_ip: string | null;
+  application_port: number | null;
+  access_prefix: string | null;
+  strip_prefix: boolean | null;
+  pilot_cli: string | null;
   provider_dispatcher_set: number;
-  application_dispatcher_set: number;
+  application_dispatcher_set: number | null;
+};
+
+export type TrunkStatus = {
+  trunkId: number;
+  registration: { enabled: boolean; ok: boolean; state: string; expires: number | null; error?: string };
+  provider: { ok: boolean; setId: number; destination: string; state: string; error?: string };
+};
+
+export type InboundRoute = {
+  id: number;
+  start_did: string;
+  end_did: string;
+  destination_set_id: number;
+  description: string | null;
+  trunk_id: number | null;
+  trunk_name: string;
+  provider_set_id: number | null;
+  application_name: string;
+  application_destination: string | null;
+  application_ip: string | null;
+  application_port: number | null;
+};
+
+export type InboundRouteInput = {
+  startDid: string;
+  endDid?: string;
+  trunkId: number;
+  applicationName: string;
+  applicationIp: string;
+  applicationPort: number;
+  destinationSetId: number;
+  description?: string;
+};
+
+export type OutboundRoute = {
+  id: number;
+  prefix: string;
+  sipline_set_id: number;
+  description: string;
+  routing_mode: string;
+  strip_prefix: boolean;
+  trunk_id: number | null;
+  trunk_name: string;
+  provider_destination: string | null;
+  pilot_cli: string | null;
+};
+
+export type OutboundRouteInput = {
+  prefix: string;
+  trunkId: number;
+  pilotCli: string;
+  stripPrefix: boolean;
+  routingMode?: 'dial_prefix';
+  description?: string;
 };
 
 export type ProvisionPlan = {
@@ -80,5 +127,16 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(input),
     }),
-  status: (id: number) => request<unknown>(`/api/trunks/${id}/status`),
+  trunkStatuses: () => request<TrunkStatus[]>('/api/trunks/statuses'),
+  status: (id: number) => request<TrunkStatus>(`/api/trunks/${id}/status`),
+  listInboundRoutes: () => request<InboundRoute[]>('/api/inbound-routes'),
+  createInboundRoute: (input: InboundRouteInput) =>
+    request<{ route: InboundRoute }>('/api/inbound-routes', { method: 'POST', body: JSON.stringify(input) }),
+  updateInboundRoute: (id: number, input: InboundRouteInput) =>
+    request<{ route: InboundRoute }>(`/api/inbound-routes/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
+  listOutboundRoutes: () => request<OutboundRoute[]>('/api/outbound-routes'),
+  createOutboundRoute: (input: OutboundRouteInput) =>
+    request<{ route: OutboundRoute }>('/api/outbound-routes', { method: 'POST', body: JSON.stringify(input) }),
+  updateOutboundRoute: (id: number, input: OutboundRouteInput) =>
+    request<{ route: OutboundRoute }>(`/api/outbound-routes/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
 };

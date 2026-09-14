@@ -28,34 +28,9 @@ export class TrunkInputDto {
   @IsString()
   registrationServer?: string;
 
-  @IsString()
-  applicationName!: string;
-
-  @IsString()
-  applicationIp!: string;
-
   @IsInt()
   @Min(1)
-  @Max(65535)
-  applicationPort!: number;
-
-  @IsString()
-  @MaxLength(32)
-  accessPrefix!: string;
-
-  @IsBoolean()
-  stripPrefix!: boolean;
-
-  @IsString()
-  pilotCli!: string;
-
-  @IsOptional()
-  @IsInt()
-  providerDispatcherSet?: number;
-
-  @IsOptional()
-  @IsInt()
-  applicationDispatcherSet?: number;
+  providerDispatcherSet!: number;
 }
 
 export class PreviewTrunkDto extends TrunkInputDto {}

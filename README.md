@@ -49,6 +49,14 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
 
    This creates only `sbc_trunks` and `sbc_audit_log`. It does not alter existing OpenSIPS or custom routing tables.
 
+   When upgrading an existing installation to the separate trunk/inbound/outbound screens, apply the one-time app-owned migration first:
+
+   ```bash
+   mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/001_separate_routing.sql
+   ```
+
+   It only makes the old route fields in `sbc_trunks` optional. It does not change `registrant`, `dispatcher`, `address`, `did_mapping`, `did_provider_mapping`, or `prefix_mapping`.
+
 5. Run the backend:
 
    ```bash

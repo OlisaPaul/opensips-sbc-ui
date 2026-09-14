@@ -15,6 +15,11 @@ export class TrunksController {
     return this.trunks.list();
   }
 
+  @Get('statuses')
+  statuses() {
+    return this.trunks.statuses();
+  }
+
   @Get(':id')
   get(@Param('id', ParseIntPipe) id: number) {
     return this.trunks.get(id);

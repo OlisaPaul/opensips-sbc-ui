@@ -17,6 +17,16 @@ mariadb -h 127.0.0.1 -u opensips -p opensips < database/schema.sql
 
 This schema file does not alter any existing OpenSIPS or custom routing table.
 
+## Upgrading An Existing Installation
+
+The separate Trunks, Inbound Routing, and Outbound Routing screens require the old embedded route fields in the app-owned `sbc_trunks` table to be optional. Apply this migration once, before rerunning the installer:
+
+```bash
+mariadb -h 127.0.0.1 -u opensips -p opensips < database/migrations/001_separate_routing.sql
+```
+
+This migration preserves all rows and does not alter any OpenSIPS or custom routing table. The installer intentionally does not run database migrations automatically.
+
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 
 If a supported Node.js and npm installation already exists, including a NodeSource installation, the installer reuses it and does not ask DNF or APT to replace it.

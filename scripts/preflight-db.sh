@@ -65,7 +65,7 @@ mysql_cmd=(
   "$DB_NAME"
 )
 
-required_tables=(registrant dispatcher address did_mapping prefix_mapping sbc_trunks sbc_audit_log)
+required_tables=(registrant dispatcher address did_mapping did_provider_mapping prefix_mapping sbc_trunks sbc_audit_log)
 
 echo "Checking required OpenSIPS tables in $DB_NAME..."
 for table in "${required_tables[@]}"; do
@@ -93,8 +93,18 @@ for column in registrar proxy aor username password binding_uri; do check_column
 for column in setid destination state weight priority attrs description; do check_column dispatcher "$column"; done
 for column in grp ip mask port proto pattern context_info; do check_column address "$column"; done
 for column in id start_did end_did destination_set_id description; do check_column did_mapping "$column"; done
+for column in id start_did end_did provider sipline_set_id description; do check_column did_provider_mapping "$column"; done
 for column in id prefix sipline_set_id description routing_mode strip_prefix; do check_column prefix_mapping "$column"; done
 for column in id name provider_ip provider_port username encrypted_password registration_enabled registration_server application_name application_ip application_port access_prefix strip_prefix pilot_cli provider_dispatcher_set application_dispatcher_set created_at updated_at; do check_column sbc_trunks "$column"; done
 for column in id action actor target payload_json created_at; do check_column sbc_audit_log "$column"; done
+
+for column in application_name application_ip application_port access_prefix strip_prefix pilot_cli application_dispatcher_set; do
+  nullable="$("${mysql_cmd[@]}" -e "select is_nullable from information_schema.columns where table_schema = database() and table_name = 'sbc_trunks' and column_name = '$column';")"
+  if [[ "$nullable" != "YES" ]]; then
+    echo "Migration required: sbc_trunks.$column must be nullable."
+    echo "Run: $database_client -h $DB_HOST -P $DB_PORT -u $DB_USER -p $DB_NAME < database/migrations/001_separate_routing.sql"
+    exit 1
+  fi
+done
 
 echo "Database preflight passed."

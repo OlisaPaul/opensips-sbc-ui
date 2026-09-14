@@ -36,6 +36,15 @@ export class TrunksService {
     return this.toPublic(row);
   }
 
+  async statuses() {
+    const trunks = await this.database.query<TrunkRow[]>('select * from sbc_trunks order by name');
+    const [registration, dispatcher] = await Promise.all([
+      this.mi.execute('reg_list'),
+      this.mi.dispatcherStatus(),
+    ]);
+    return trunks.map((trunk) => this.buildStatus(trunk, registration, dispatcher));
+  }
+
   async create(input: CreateTrunkDto) {
     if (input.registrationEnabled && !input.password) {
       throw new BadRequestException('Password is required when registration is enabled.');
@@ -75,16 +84,10 @@ export class TrunksService {
   async status(id: number) {
     const trunk = await this.findTrunk(id);
     const [registration, dispatcher] = await Promise.all([
-      trunk.registration_enabled ? this.mi.registrationStatus(trunk.username) : Promise.resolve(null),
+      trunk.registration_enabled ? this.mi.execute('reg_list') : Promise.resolve(null),
       this.mi.dispatcherStatus(),
     ]);
-
-    return {
-      registration,
-      dispatcher,
-      inbound: `${trunk.username} -> ${trunk.application_name} (${trunk.application_ip}:${trunk.application_port})`,
-      outbound: `${trunk.access_prefix} -> ${trunk.name} (set ${trunk.provider_dispatcher_set})`,
-    };
+    return this.buildStatus(trunk, registration, dispatcher);
   }
 
   private async findTrunk(id: number) {
@@ -99,8 +102,7 @@ export class TrunksService {
   }
 
   private async saveTrunk(input: CreateTrunkDto | UpdateTrunkDto, connection: DbConnection, id?: number) {
-    const providerSet = input.providerDispatcherSet ?? 1;
-    const applicationSet = input.applicationDispatcherSet ?? 8;
+    const providerSet = input.providerDispatcherSet;
     const encryptedPassword = input.password ? this.credentials.encrypt(input.password) : null;
     const params = {
       name: input.name,
@@ -110,14 +112,7 @@ export class TrunksService {
       encryptedPassword,
       registrationEnabled: input.registrationEnabled ? 1 : 0,
       registrationServer: input.registrationServer?.trim() || null,
-      applicationName: input.applicationName,
-      applicationIp: input.applicationIp,
-      applicationPort: input.applicationPort,
-      accessPrefix: input.accessPrefix,
-      stripPrefix: input.stripPrefix ? 1 : 0,
-      pilotCli: input.pilotCli,
       providerSet,
-      applicationSet,
     };
 
     if (id) {
@@ -128,11 +123,7 @@ export class TrunksService {
              encrypted_password = coalesce(:encryptedPassword, encrypted_password),
              registration_enabled = :registrationEnabled,
              registration_server = :registrationServer,
-             application_name = :applicationName, application_ip = :applicationIp,
-             application_port = :applicationPort, access_prefix = :accessPrefix,
-             strip_prefix = :stripPrefix, pilot_cli = :pilotCli,
-             provider_dispatcher_set = :providerSet,
-             application_dispatcher_set = :applicationSet
+             provider_dispatcher_set = :providerSet
          where id = :id`,
         { ...params, id },
         connection,
@@ -143,12 +134,10 @@ export class TrunksService {
     const result = await this.database.query<ResultSetHeader>(
       `insert into sbc_trunks
        (name, provider_ip, provider_port, username, encrypted_password, registration_enabled,
-        registration_server, application_name, application_ip, application_port, access_prefix,
-        strip_prefix, pilot_cli, provider_dispatcher_set, application_dispatcher_set)
+        registration_server, provider_dispatcher_set)
        values
        (:name, :providerIp, :providerPort, :username, :encryptedPassword, :registrationEnabled,
-        :registrationServer, :applicationName, :applicationIp, :applicationPort, :accessPrefix,
-        :stripPrefix, :pilotCli, :providerSet, :applicationSet)`,
+        :registrationServer, :providerSet)`,
       params,
       connection,
     );
@@ -156,10 +145,8 @@ export class TrunksService {
   }
 
   private async provisionTables(id: number, input: CreateTrunkDto | UpdateTrunkDto, connection: DbConnection) {
-    const providerSet = input.providerDispatcherSet ?? 1;
-    const applicationSet = input.applicationDispatcherSet ?? 8;
+    const providerSet = input.providerDispatcherSet;
     const providerDestination = `sip:${input.providerIp}:${input.providerPort}`;
-    const applicationDestination = `sip:${input.applicationIp}:${input.applicationPort}`;
 
     if (input.registrationEnabled) {
       const password = await this.registrationPassword(id, input, connection);
@@ -186,65 +173,7 @@ export class TrunksService {
     }
 
     await this.upsertDispatcher(providerSet, providerDestination, input.name, connection);
-    await this.upsertDispatcher(applicationSet, applicationDestination, input.applicationName, connection);
-
-    await this.upsertAddress(1, input.providerIp, input.providerPort, input.pilotCli, id, connection);
-    await this.upsertAddress(2, input.applicationIp, input.applicationPort, input.pilotCli, id, connection);
-
-    await this.upsertDidMapping(input.username, applicationSet, input.applicationName, connection);
-
-    await this.database.query(
-      `insert into prefix_mapping (prefix, sipline_set_id, description, routing_mode, strip_prefix)
-       values (:prefix, :dispatcherSet, :description, 'dial_prefix', :stripPrefix)
-       on duplicate key update sipline_set_id = values(sipline_set_id), description = values(description),
-                               routing_mode = values(routing_mode), strip_prefix = values(strip_prefix)`,
-      {
-        prefix: input.accessPrefix,
-        dispatcherSet: providerSet,
-        description: input.name.slice(0, 64),
-        stripPrefix: input.stripPrefix ? 1 : 0,
-      },
-      connection,
-    );
-  }
-
-  private async upsertDidMapping(
-    did: string,
-    destinationSetId: number,
-    description: string,
-    connection: DbConnection,
-  ) {
-    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
-      `select id from did_mapping
-       where start_did = :did and end_did = :did
-       order by id
-       limit 1`,
-      { did },
-      connection,
-    );
-    const params = {
-      did,
-      destinationSetId,
-      description: description.slice(0, 100),
-    };
-
-    if (rows[0]) {
-      await this.database.query(
-        `update did_mapping
-         set destination_set_id = :destinationSetId, description = :description
-         where start_did = :did and end_did = :did`,
-        params,
-        connection,
-      );
-      return;
-    }
-
-    await this.database.query(
-      `insert into did_mapping (start_did, end_did, destination_set_id, description)
-       values (:did, :did, :destinationSetId, :description)`,
-      params,
-      connection,
-    );
+    await this.upsertAddress(1, input.providerIp, input.providerPort, input.username, id, connection);
   }
 
   private async upsertAddress(
@@ -346,12 +275,51 @@ export class TrunksService {
     return {
       ...safe,
       registration_enabled: Boolean(row.registration_enabled),
-      strip_prefix: Boolean(row.strip_prefix),
+      strip_prefix: row.strip_prefix === null ? null : Boolean(row.strip_prefix),
     };
   }
 
   private redact(input: CreateTrunkDto | UpdateTrunkDto) {
     const { password: _password, ...safe } = input;
     return { ...safe, password: input.password ? '********' : undefined };
+  }
+
+  private buildStatus(trunk: TrunkRow, registrationResult: unknown, dispatcherResult: unknown) {
+    const registration = registrationResult as {
+      ok?: boolean;
+      error?: string;
+      response?: { Records?: Array<Record<string, unknown> & { AOR?: string; state?: string; expires?: number }> };
+    } | null;
+    const dispatcher = dispatcherResult as {
+      ok?: boolean;
+      error?: string;
+      response?: { PARTITIONS?: Array<{ SETS?: Array<{ id?: number; Destinations?: Array<{ URI?: string; state?: string }> }> }> };
+    };
+    const record = registration?.response?.Records?.find(
+      (candidate) => candidate.AOR === trunk.username || candidate.AOR?.startsWith(`sip:${trunk.username}@`),
+    );
+    const providerDestination = `sip:${trunk.provider_ip}:${trunk.provider_port}`;
+    const set = dispatcher.response?.PARTITIONS?.flatMap((partition) => partition.SETS ?? [])
+      .find((candidate) => Number(candidate.id) === Number(trunk.provider_dispatcher_set));
+    const destination = set?.Destinations?.find((candidate) => candidate.URI === providerDestination)
+      ?? set?.Destinations?.[0];
+
+    return {
+      trunkId: trunk.id,
+      registration: {
+        enabled: Boolean(trunk.registration_enabled),
+        ok: !trunk.registration_enabled || (Boolean(registration?.ok) && record?.state === 'REGISTERED_STATE'),
+        state: trunk.registration_enabled ? record?.state ?? 'NOT_FOUND' : 'DISABLED',
+        expires: record?.expires ?? null,
+        error: registration?.error,
+      },
+      provider: {
+        ok: Boolean(dispatcher.ok) && destination?.state?.toLowerCase() === 'active',
+        setId: trunk.provider_dispatcher_set,
+        destination: providerDestination,
+        state: destination?.state ?? 'Not found',
+        error: dispatcher.error,
+      },
+    };
   }
 }

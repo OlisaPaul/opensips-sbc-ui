@@ -51,6 +51,8 @@ sudo DOMAIN=sbc.example.com EMAIL=admin@example.com bash scripts/install-https-n
 
 The installer preserves `backend/.env` on subsequent deployments, validates the database schema, rebuilds both workspaces, and restarts the backend service.
 
+The backend uses the local `/usr/bin/opensips-cli` MI transport by default. The `opensips-sbc-ui` service account must be able to run MI commands, as verified with `sudo -u opensips-sbc-ui opensips-cli -x mi reg_list`. HTTP MI remains available by setting `MI_TRANSPORT=http` and `MI_URL`.
+
 ## Private/Internal HTTPS
 
 For an internal host without public DNS or Let's Encrypt access:

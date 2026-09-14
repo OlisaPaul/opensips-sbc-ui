@@ -13,7 +13,6 @@ ExecStart=/usr/bin/npm run start --workspace backend
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
-PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=__APP_DIR__

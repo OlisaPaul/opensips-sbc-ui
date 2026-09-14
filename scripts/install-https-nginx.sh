@@ -154,6 +154,14 @@ else
   echo "FRONTEND_ORIGIN=https://$DOMAIN" >> "$APP_DIR/backend/.env"
 fi
 
+if ! grep -q "^MI_TRANSPORT=" "$APP_DIR/backend/.env"; then
+  echo "MI_TRANSPORT=cli" >> "$APP_DIR/backend/.env"
+fi
+
+if ! grep -q "^MI_CLI_PATH=" "$APP_DIR/backend/.env"; then
+  echo "MI_CLI_PATH=/usr/bin/opensips-cli" >> "$APP_DIR/backend/.env"
+fi
+
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo "Node.js and npm were not installed successfully. Install Node.js 18, 20, or 22+ and rerun."
   exit 1

@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { request } from 'undici';
 
 const execFileAsync = promisify(execFile);
-const allowedCommands = new Set(['address_reload', 'ds_list', 'ds_reload', 'reg_list']);
+const allowedCommands = new Set(['address_reload', 'ds_list', 'ds_reload', 'reg_list', 'reg_reload']);
 
 export type MiResult = {
   command: string;
@@ -86,6 +86,14 @@ export class MiService {
         Records: records.filter((record) => record.AOR === aor || record.AOR?.startsWith(`sip:${aor}@`)),
       },
     };
+  }
+
+  async reloadTrunkProvisioning() {
+    return Promise.all([
+      this.execute('reg_reload'),
+      this.execute('address_reload'),
+      this.execute('ds_reload'),
+    ]);
   }
 
   async dispatcherStatus() {

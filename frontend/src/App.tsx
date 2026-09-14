@@ -13,7 +13,7 @@ type Editor = { kind: Section; id?: number } | null;
 
 const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   name: '', providerIp: '', providerPort: 5060, username: '', password: '',
-  registrationEnabled: true, registrationServer: '', providerDispatcherSet,
+  registrationEnabled: true, registrationServer: '', bindingUri: '', providerDispatcherSet,
 });
 
 const newInbound = (trunks: Trunk[]): InboundRouteInput => ({
@@ -30,7 +30,7 @@ function trunkInput(trunk: Trunk): TrunkInput {
   return {
     name: trunk.name, providerIp: trunk.provider_ip, providerPort: trunk.provider_port,
     username: trunk.username, password: '', registrationEnabled: trunk.registration_enabled,
-    registrationServer: trunk.registration_server ?? '', providerDispatcherSet: trunk.provider_dispatcher_set,
+    registrationServer: trunk.registration_server ?? '', bindingUri: '', providerDispatcherSet: trunk.provider_dispatcher_set,
   };
 }
 
@@ -265,7 +265,7 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
         <div className="setNotice">The set is created when this trunk is saved. OpenSIPS does not need a separate empty set record.</div>
       </>}
     </FormSection>
-    <FormSection title="Registration"><label className="switchRow"><span><b>Register with provider</b><small>OpenSIPS sends REGISTER requests for this trunk</small></span><input type="checkbox" checked={form.registrationEnabled} onChange={(e) => setForm({ ...form, registrationEnabled: e.target.checked })} /></label>{form.registrationEnabled && <><Field label={trunk ? 'Password (leave blank to keep current)' : 'Password'}><input required={!trunk} type="password" value={form.password ?? ''} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field><Field label="Registrar (optional)" hint="Defaults to the provider IP and port"><input value={form.registrationServer ?? ''} onChange={(e) => setForm({ ...form, registrationServer: e.target.value })} placeholder="sip:46.62.134.9:5060" /></Field></>}</FormSection>
+    <FormSection title="Registration"><label className="switchRow"><span><b>Register with provider</b><small>OpenSIPS sends REGISTER requests for this trunk</small></span><input type="checkbox" checked={form.registrationEnabled} onChange={(e) => setForm({ ...form, registrationEnabled: e.target.checked })} /></label>{form.registrationEnabled && <><Field label={trunk ? 'Password (leave blank to keep current)' : 'Password'}><input required={!trunk} type="password" value={form.password ?? ''} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field><Field label="Registrar (optional)" hint="Defaults to the provider IP and port"><input value={form.registrationServer ?? ''} onChange={(e) => setForm({ ...form, registrationServer: e.target.value })} placeholder="sip:46.62.134.9:5060" /></Field><Field label="SBC Contact URI (optional)" hint="For example sip:02013313100@10.81.0.194:5060. Leave blank to reuse an existing binding or the server setting."><input value={form.bindingUri ?? ''} onChange={(e) => setForm({ ...form, bindingUri: e.target.value })} placeholder={`sip:${form.username || 'username'}@10.81.0.194:5060`} /></Field></>}</FormSection>
   </Drawer>;
 }
 

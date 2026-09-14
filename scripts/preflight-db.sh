@@ -89,7 +89,7 @@ check_column() {
 }
 
 echo "Checking required columns..."
-for column in registrar proxy aor username password binding_uri; do check_column registrant "$column"; done
+for column in id registrar proxy aor username password binding_uri; do check_column registrant "$column"; done
 for column in setid destination state weight priority attrs description; do check_column dispatcher "$column"; done
 for column in grp ip mask port proto pattern context_info; do check_column address "$column"; done
 for column in id start_did end_did destination_set_id description; do check_column did_mapping "$column"; done

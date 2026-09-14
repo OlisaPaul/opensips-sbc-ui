@@ -28,6 +28,11 @@ export class TrunkInputDto {
   @IsString()
   registrationServer?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  bindingUri?: string;
+
   @IsInt()
   @Min(1)
   providerDispatcherSet!: number;

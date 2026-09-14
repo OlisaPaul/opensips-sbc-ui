@@ -101,5 +101,6 @@ DB_HOST=127.0.0.1 DB_PORT=3306 DB_USER=opensips DB_PASSWORD='your-password' DB_N
 - Set `CREDENTIAL_ENCRYPTION_KEY` to a long random secret before production use. Rotating it requires re-entering trunk passwords.
 - Set `MI_ENABLED=false` in development if OpenSIPS MI is not available.
 - Production defaults to `MI_TRANSPORT=cli` and `/usr/bin/opensips-cli`. Set `MI_TRANSPORT=http` only when OpenSIPS exposes an HTTP MI endpoint at `MI_URL`.
+- Set `SIP_BINDING_IP` and `SIP_BINDING_PORT` to the local OpenSIPS SIP listener used in REGISTER Contact headers. An individual trunk can override this with its SBC Contact URI.
 - The UI assumes the range-based `did_mapping(start_did, end_did, destination_set_id, description)` and `prefix_mapping(prefix, sipline_set_id, description, routing_mode, strip_prefix)` tables already exist.
 - The app does not edit `opensips.cfg` in v1.

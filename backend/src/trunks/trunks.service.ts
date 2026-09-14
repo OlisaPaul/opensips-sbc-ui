@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService, DbConnection } from '../database/database.service';
@@ -25,6 +26,7 @@ export class TrunksService {
     private readonly mi: MiService,
     private readonly audit: AuditService,
     private readonly credentials: CredentialService,
+    private readonly config: ConfigService,
   ) {}
 
   async list() {
@@ -113,7 +115,7 @@ export class TrunksService {
       return trunkId;
     });
 
-    const reload = await this.mi.reloadProvisioning();
+    const reload = await this.mi.reloadTrunkProvisioning();
     await this.audit.record('trunk.create', 'system', `trunk:${id}`, {
       trunk: this.redact(input),
       reload,
@@ -123,13 +125,13 @@ export class TrunksService {
   }
 
   async update(id: number, input: UpdateTrunkDto) {
-    await this.findTrunk(id);
+    const previous = await this.findTrunk(id);
     await this.database.transaction(async (connection) => {
       await this.saveTrunk(input, connection, id);
-      await this.provisionTables(id, input, connection);
+      await this.provisionTables(id, input, connection, previous.username);
     });
 
-    const reload = await this.mi.reloadProvisioning();
+    const reload = await this.mi.reloadTrunkProvisioning();
     await this.audit.record('trunk.update', 'system', `trunk:${id}`, {
       trunk: this.redact(input),
       reload,
@@ -201,30 +203,57 @@ export class TrunksService {
     return result.insertId;
   }
 
-  private async provisionTables(id: number, input: CreateTrunkDto | UpdateTrunkDto, connection: DbConnection) {
+  private async provisionTables(
+    id: number,
+    input: CreateTrunkDto | UpdateTrunkDto,
+    connection: DbConnection,
+    previousUsername?: string,
+  ) {
     const providerSet = input.providerDispatcherSet;
     const providerDestination = `sip:${input.providerIp}:${input.providerPort}`;
 
     if (input.registrationEnabled) {
       const password = await this.registrationPassword(id, input, connection);
-      await this.database.query(
-        `insert into registrant (registrar, proxy, aor, third_party_registrant, username, password, binding_uri)
-         values (:registrar, :proxy, :aor, '', :username, :password, :bindingUri)
-         on duplicate key update proxy = values(proxy), password = values(password), binding_uri = values(binding_uri)`,
-        {
-          registrar: input.registrationServer?.trim() || providerDestination,
-          proxy: providerDestination,
-          aor: `sip:${input.username}@${input.providerIp}`,
-          username: input.username,
-          password,
-          bindingUri: `sip:${input.username}@${input.providerIp}`,
-        },
+      const bindingUri = await this.registrationBindingUri(input, connection);
+      const existing = await this.database.query<(RowDataPacket & { id: number })[]>(
+        `select id from registrant
+         where username = :username or (:previousUsername is not null and username = :previousUsername)
+         order by (username = :username) desc, id
+         limit 1`,
+        { username: input.username, previousUsername: previousUsername ?? null },
         connection,
       );
+      const registration = {
+        id: existing[0]?.id,
+        registrar: input.registrationServer?.trim() || providerDestination,
+        proxy: providerDestination,
+        aor: `sip:${input.username}@${input.providerIp}`,
+        username: input.username,
+        password,
+        bindingUri,
+      };
+      if (existing[0]) {
+        await this.database.query(
+          `update registrant
+           set registrar = :registrar, proxy = :proxy, aor = :aor, username = :username,
+               password = :password, binding_uri = :bindingUri
+           where id = :id`,
+          registration,
+          connection,
+        );
+      } else {
+        await this.database.query(
+          `insert into registrant (registrar, proxy, aor, third_party_registrant, username, password, binding_uri)
+           values (:registrar, :proxy, :aor, '', :username, :password, :bindingUri)`,
+          registration,
+          connection,
+        );
+      }
     } else {
       await this.database.query(
-        `delete from registrant where username = :username`,
-        { username: input.username },
+        `delete from registrant
+         where username = :username or (:previousUsername is not null and username = :previousUsername)`,
+        { username: input.username, previousUsername: previousUsername ?? null },
         connection,
       );
     }
@@ -325,6 +354,51 @@ export class TrunksService {
       throw new BadRequestException('Password is required when registration is enabled.');
     }
     return this.credentials.decrypt(encrypted);
+  }
+
+  private async registrationBindingUri(
+    input: CreateTrunkDto | UpdateTrunkDto,
+    connection: DbConnection,
+  ) {
+    const supplied = input.bindingUri?.trim();
+    if (supplied) {
+      this.assertSipUri(supplied, 'SBC Contact URI');
+      return supplied;
+    }
+
+    const bindingIp = this.config.get<string>('SIP_BINDING_IP')?.trim();
+    const configuredPort = Number(this.config.get<string>('SIP_BINDING_PORT') ?? 5060);
+    const bindingPort = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535
+      ? configuredPort
+      : 5060;
+    if (bindingIp) {
+      return `sip:${input.username}@${bindingIp}:${bindingPort}`;
+    }
+
+    const existing = await this.database.query<(RowDataPacket & { binding_uri: string })[]>(
+      `select binding_uri from registrant
+       where binding_uri is not null and binding_uri <> ''
+       order by (username = :username) desc, id
+       limit 20`,
+      { username: input.username },
+      connection,
+    );
+    for (const row of existing) {
+      const match = row.binding_uri.match(/^(sips?):[^@]+@([^:;>]+)(.*)$/i);
+      if (match && match[2] !== input.providerIp) {
+        return `${match[1]}:${input.username}@${match[2]}${match[3]}`;
+      }
+    }
+
+    throw new BadRequestException(
+      'SBC Contact URI is required for registration. Enter it in the trunk form or set SIP_BINDING_IP in backend/.env.',
+    );
+  }
+
+  private assertSipUri(value: string, label: string) {
+    if (!/^sips?:[^@\s]+@[^@\s]+$/i.test(value)) {
+      throw new BadRequestException(`${label} must be a valid SIP URI such as sip:user@10.81.0.194:5060.`);
+    }
   }
 
   private toPublic(row: TrunkRow) {

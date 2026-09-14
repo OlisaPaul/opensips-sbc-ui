@@ -6,6 +6,7 @@ export type TrunkInput = {
   password?: string;
   registrationEnabled: boolean;
   registrationServer?: string;
+  bindingUri?: string;
   providerDispatcherSet: number;
 };
 

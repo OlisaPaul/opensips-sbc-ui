@@ -63,6 +63,8 @@ The installer preserves `backend/.env` on subsequent deployments, validates the 
 
 The backend uses the local `/usr/bin/opensips-cli` MI transport by default. The `opensips-sbc-ui` service account must be able to run MI commands, as verified with `sudo -u opensips-sbc-ui opensips-cli -x mi reg_list`. HTTP MI remains available by setting `MI_TRANSPORT=http` and `MI_URL`.
 
+Set `SIP_BINDING_IP` and `SIP_BINDING_PORT` in the deployed `backend/.env` to the local OpenSIPS SIP listener. For example, `SIP_BINDING_IP=10.81.0.194` and `SIP_BINDING_PORT=5060`. New REGISTER contacts use this listener unless a trunk supplies an explicit SBC Contact URI.
+
 ## Private/Internal HTTPS
 
 For an internal host without public DNS or Let's Encrypt access:

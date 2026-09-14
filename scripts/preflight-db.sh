@@ -65,7 +65,7 @@ mysql_cmd=(
   "$DB_NAME"
 )
 
-required_tables=(registrant dispatcher address did_mapping prefix_mapping)
+required_tables=(registrant dispatcher address did_mapping prefix_mapping sbc_trunks sbc_audit_log)
 
 echo "Checking required OpenSIPS tables in $DB_NAME..."
 for table in "${required_tables[@]}"; do
@@ -92,7 +92,9 @@ echo "Checking required columns..."
 for column in registrar proxy aor username password binding_uri; do check_column registrant "$column"; done
 for column in setid destination state weight priority attrs description; do check_column dispatcher "$column"; done
 for column in grp ip mask port proto pattern context_info; do check_column address "$column"; done
-for column in did dispatcher_set application_name enabled; do check_column did_mapping "$column"; done
-for column in prefix dispatcher_set strip_prefix pilot_cli enabled; do check_column prefix_mapping "$column"; done
+for column in id start_did end_did destination_set_id description; do check_column did_mapping "$column"; done
+for column in id prefix sipline_set_id description routing_mode strip_prefix; do check_column prefix_mapping "$column"; done
+for column in id name provider_ip provider_port username encrypted_password registration_enabled registration_server application_name application_ip application_port access_prefix strip_prefix pilot_cli provider_dispatcher_set application_dispatcher_set created_at updated_at; do check_column sbc_trunks "$column"; done
+for column in id action actor target payload_json created_at; do check_column sbc_audit_log "$column"; done
 
 echo "Database preflight passed."

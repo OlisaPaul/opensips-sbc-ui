@@ -204,25 +204,58 @@ export class TrunksService {
       connection,
     );
 
-    await this.database.query(
-      `insert into did_mapping (did, dispatcher_set, application_name, enabled)
-       values (:did, :dispatcherSet, :applicationName, 1)
-       on duplicate key update dispatcher_set = values(dispatcher_set), application_name = values(application_name), enabled = 1`,
-      { did: input.username, dispatcherSet: applicationSet, applicationName: input.applicationName },
-      connection,
-    );
+    await this.upsertDidMapping(input.username, applicationSet, input.applicationName, connection);
 
     await this.database.query(
-      `insert into prefix_mapping (prefix, dispatcher_set, strip_prefix, pilot_cli, enabled)
-       values (:prefix, :dispatcherSet, :stripPrefix, :pilotCli, 1)
-       on duplicate key update dispatcher_set = values(dispatcher_set), strip_prefix = values(strip_prefix),
-                               pilot_cli = values(pilot_cli), enabled = 1`,
+      `insert into prefix_mapping (prefix, sipline_set_id, description, routing_mode, strip_prefix)
+       values (:prefix, :dispatcherSet, :description, 'dial_prefix', :stripPrefix)
+       on duplicate key update sipline_set_id = values(sipline_set_id), description = values(description),
+                               routing_mode = values(routing_mode), strip_prefix = values(strip_prefix)`,
       {
         prefix: input.accessPrefix,
         dispatcherSet: providerSet,
+        description: input.name.slice(0, 64),
         stripPrefix: input.stripPrefix ? 1 : 0,
-        pilotCli: input.pilotCli,
       },
+      connection,
+    );
+  }
+
+  private async upsertDidMapping(
+    did: string,
+    destinationSetId: number,
+    description: string,
+    connection: DbConnection,
+  ) {
+    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
+      `select id from did_mapping
+       where start_did = :did and end_did = :did
+       order by id
+       limit 1`,
+      { did },
+      connection,
+    );
+    const params = {
+      did,
+      destinationSetId,
+      description: description.slice(0, 100),
+    };
+
+    if (rows[0]) {
+      await this.database.query(
+        `update did_mapping
+         set destination_set_id = :destinationSetId, description = :description
+         where start_did = :did and end_did = :did`,
+        params,
+        connection,
+      );
+      return;
+    }
+
+    await this.database.query(
+      `insert into did_mapping (start_did, end_did, destination_set_id, description)
+       values (:did, :did, :destinationSetId, :description)`,
+      params,
       connection,
     );
   }

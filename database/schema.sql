@@ -71,19 +71,8 @@ deallocate prepare stmt;
 
 set @index_exists = (
   select count(*) from information_schema.statistics
-  where table_schema = database() and table_name = 'did_mapping' and index_name = 'uniq_did_mapping_did'
-);
-set @sql = if(@index_exists = 0,
-  'alter table did_mapping add unique key uniq_did_mapping_did (did)',
-  'select ''did_mapping index already exists'''
-);
-prepare stmt from @sql;
-execute stmt;
-deallocate prepare stmt;
-
-set @index_exists = (
-  select count(*) from information_schema.statistics
-  where table_schema = database() and table_name = 'prefix_mapping' and index_name = 'uniq_prefix_mapping_prefix'
+  where table_schema = database() and table_name = 'prefix_mapping'
+    and column_name = 'prefix' and non_unique = 0
 );
 set @sql = if(@index_exists = 0,
   'alter table prefix_mapping add unique key uniq_prefix_mapping_prefix (prefix)',

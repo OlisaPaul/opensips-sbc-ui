@@ -34,8 +34,13 @@ export class TrunkPlannerService {
       },
       {
         label: 'Map DID to application dispatcher set',
-        sql: 'insert/update did_mapping(did, dispatcher_set, application_name)',
-        params: { did: input.username, dispatcher_set: applicationSet, application_name: input.applicationName },
+        sql: 'insert/update did_mapping(start_did, end_did, destination_set_id, description)',
+        params: {
+          start_did: input.username,
+          end_did: input.username,
+          destination_set_id: applicationSet,
+          description: input.applicationName,
+        },
       },
       {
         label: 'Provision application dispatcher gateway',
@@ -49,12 +54,13 @@ export class TrunkPlannerService {
       },
       {
         label: 'Map outbound prefix to provider dispatcher set',
-        sql: 'insert/update prefix_mapping(prefix, strip_prefix, dispatcher_set, pilot_cli)',
+        sql: 'insert/update prefix_mapping(prefix, sipline_set_id, description, routing_mode, strip_prefix)',
         params: {
           prefix: input.accessPrefix,
           strip_prefix: input.stripPrefix,
-          dispatcher_set: providerSet,
-          pilot_cli: input.pilotCli,
+          sipline_set_id: providerSet,
+          description: input.name,
+          routing_mode: 'dial_prefix',
         },
       },
       {

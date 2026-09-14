@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class TrunkInputDto {
   @IsString()
@@ -14,6 +14,7 @@ export class TrunkInputDto {
   providerPort!: number;
 
   @IsString()
+  @MaxLength(20)
   username!: string;
 
   @IsOptional()
@@ -39,6 +40,7 @@ export class TrunkInputDto {
   applicationPort!: number;
 
   @IsString()
+  @MaxLength(32)
   accessPrefix!: string;
 
   @IsBoolean()

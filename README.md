@@ -13,7 +13,7 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
 - DID routing to an application dispatcher set through `did_mapping`.
 - Application/PBX authorization in `address` group `2`.
 - Outbound prefix routing through `prefix_mapping`.
-- Pilot CLI through `address.pattern` and `prefix_mapping.pilot_cli`.
+- Pilot CLI through `address.pattern` and the app-owned trunk metadata.
 - MI reloads for `address_reload` and `ds_reload`.
 - MI status checks for registration and dispatcher state.
 - Audit log entries for create/update operations.
@@ -92,5 +92,5 @@ DB_HOST=127.0.0.1 DB_PORT=3306 DB_USER=opensips DB_PASSWORD='your-password' DB_N
 - The app stores a local encrypted copy of SIP credentials in `sbc_trunks.encrypted_password`, but OpenSIPS `registrant.password` still receives the plaintext secret because OpenSIPS needs it to authenticate REGISTER.
 - Set `CREDENTIAL_ENCRYPTION_KEY` to a long random secret before production use. Rotating it requires re-entering trunk passwords.
 - Set `MI_ENABLED=false` in development if OpenSIPS MI is not available.
-- The UI assumes the custom tables `did_mapping` and `prefix_mapping` already exist and match the columns shown in `database/schema.sql` usage.
+- The UI assumes the range-based `did_mapping(start_did, end_did, destination_set_id, description)` and `prefix_mapping(prefix, sipline_set_id, description, routing_mode, strip_prefix)` tables already exist.
 - The app does not edit `opensips.cfg` in v1.

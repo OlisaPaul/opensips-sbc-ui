@@ -12,7 +12,7 @@ export class DatabaseService {
     params: Record<string, unknown> = {},
     connection: DbConnection = this.pool,
   ): Promise<T> {
-    const [rows] = await connection.query<T>(sql, params);
+    const [rows] = await connection.query<T>(sql, params as never);
     return rows;
   }
 

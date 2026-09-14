@@ -11,6 +11,8 @@ Prerequisites:
 
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 
+If a supported Node.js and npm installation already exists, including a NodeSource installation, the installer reuses it and does not ask DNF or APT to replace it.
+
 For RHEL 8 or 9, if the default Node.js stream is older than version 18, select a supported stream before running the installer:
 
 ```bash

@@ -50,6 +50,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+has_supported_node=false
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  node_major="$(node -p 'process.versions.node.split(`.`)[0]')"
+  if (( node_major == 18 || node_major == 20 || node_major >= 22 )); then
+    has_supported_node=true
+  fi
+fi
+
 if [[ ! -r /etc/os-release ]]; then
   echo "Cannot detect the operating system because /etc/os-release is unavailable."
   exit 1
@@ -69,13 +77,21 @@ elif [[ -z "$os_family" && " ${ID_LIKE:-} " == *" debian "* ]]; then
 fi
 
 if [[ "$os_family" == "rhel" ]]; then
-  dnf install -y nginx nodejs npm rsync mariadb openssl httpd-tools policycoreutils-python-utils
+  rhel_packages=(nginx rsync mariadb openssl httpd-tools policycoreutils-python-utils)
+  if [[ "$has_supported_node" != "true" ]]; then
+    rhel_packages+=(nodejs npm)
+  fi
+  dnf install -y "${rhel_packages[@]}"
   nginx_config_dir="/etc/nginx/conf.d"
   nginx_config_path="$nginx_config_dir/opensips-sbc-ui.conf"
   nginx_bootstrap_path="$nginx_config_dir/opensips-sbc-ui-bootstrap.conf"
 elif [[ "$os_family" == "debian" ]]; then
   apt-get update
-  apt-get install -y nginx nodejs npm rsync default-mysql-client openssl apache2-utils
+  debian_packages=(nginx rsync default-mysql-client openssl apache2-utils)
+  if [[ "$has_supported_node" != "true" ]]; then
+    debian_packages+=(nodejs npm)
+  fi
+  apt-get install -y "${debian_packages[@]}"
   nginx_config_dir="/etc/nginx/sites-available"
   nginx_config_path="$nginx_config_dir/opensips-sbc-ui.conf"
   nginx_bootstrap_path="$nginx_config_dir/opensips-sbc-ui-bootstrap.conf"
@@ -138,8 +154,13 @@ else
   echo "FRONTEND_ORIGIN=https://$DOMAIN" >> "$APP_DIR/backend/.env"
 fi
 
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "Node.js and npm were not installed successfully. Install Node.js 18, 20, or 22+ and rerun."
+  exit 1
+fi
+
 node_major="$(node -p 'process.versions.node.split(`.`)[0]')"
-if (( node_major < 18 )) || [[ "$node_major" == "19" || "$node_major" == "21" ]]; then
+if (( node_major != 18 && node_major != 20 && node_major < 22 )); then
   echo "Unsupported Node.js version: $(node --version). Install Node.js 18, 20, or 22+ and rerun."
   exit 1
 fi

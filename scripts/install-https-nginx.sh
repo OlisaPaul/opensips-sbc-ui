@@ -50,16 +50,54 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-apt-get update
-apt-get install -y nginx nodejs npm rsync default-mysql-client
-
-if [[ "$SELF_SIGNED" != "true" ]]; then
-  apt-get install -y certbot python3-certbot-nginx
-else
-  apt-get install -y openssl
+if [[ ! -r /etc/os-release ]]; then
+  echo "Cannot detect the operating system because /etc/os-release is unavailable."
+  exit 1
 fi
 
-id -u opensips-sbc-ui >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin opensips-sbc-ui
+# shellcheck disable=SC1091
+source /etc/os-release
+os_family=""
+case "${ID:-}" in
+  rhel | centos | rocky | almalinux | ol | fedora) os_family="rhel" ;;
+  debian | ubuntu) os_family="debian" ;;
+esac
+if [[ -z "$os_family" && " ${ID_LIKE:-} " == *" rhel "* ]]; then
+  os_family="rhel"
+elif [[ -z "$os_family" && " ${ID_LIKE:-} " == *" debian "* ]]; then
+  os_family="debian"
+fi
+
+if [[ "$os_family" == "rhel" ]]; then
+  dnf install -y nginx nodejs npm rsync mariadb openssl httpd-tools policycoreutils-python-utils
+  nginx_config_dir="/etc/nginx/conf.d"
+  nginx_config_path="$nginx_config_dir/opensips-sbc-ui.conf"
+  nginx_bootstrap_path="$nginx_config_dir/opensips-sbc-ui-bootstrap.conf"
+elif [[ "$os_family" == "debian" ]]; then
+  apt-get update
+  apt-get install -y nginx nodejs npm rsync default-mysql-client openssl apache2-utils
+  nginx_config_dir="/etc/nginx/sites-available"
+  nginx_config_path="$nginx_config_dir/opensips-sbc-ui.conf"
+  nginx_bootstrap_path="$nginx_config_dir/opensips-sbc-ui-bootstrap.conf"
+else
+  echo "Unsupported Linux distribution: ${PRETTY_NAME:-${ID:-unknown}}"
+  exit 1
+fi
+
+if [[ "$SELF_SIGNED" != "true" ]] && ! command -v certbot >/dev/null 2>&1; then
+  if [[ "$os_family" == "rhel" ]]; then
+    if ! dnf install -y certbot; then
+      echo "Certbot is unavailable. Enable a repository that provides certbot (commonly EPEL), or use SELF_SIGNED=true."
+      exit 1
+    fi
+  else
+    apt-get install -y certbot
+  fi
+fi
+
+nologin_shell="$(command -v nologin || true)"
+nologin_shell="${nologin_shell:-/sbin/nologin}"
+id -u opensips-sbc-ui >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell "$nologin_shell" opensips-sbc-ui
 
 mkdir -p "$APP_DIR"
 rsync -a --delete \
@@ -116,6 +154,21 @@ fi
 
 mkdir -p /var/www/html
 
+if [[ "$os_family" == "rhel" ]]; then
+  if command -v getenforce >/dev/null 2>&1 && [[ "$(getenforce)" != "Disabled" ]]; then
+    setsebool -P httpd_can_network_connect 1
+    semanage fcontext -a -t httpd_sys_content_t "$APP_DIR/frontend/dist(/.*)?" 2>/dev/null || \
+      semanage fcontext -m -t httpd_sys_content_t "$APP_DIR/frontend/dist(/.*)?"
+    restorecon -RF "$APP_DIR/frontend/dist"
+  fi
+
+  if systemctl is-active --quiet firewalld; then
+    firewall-cmd --permanent --add-port=80/tcp
+    firewall-cmd --permanent --add-port=443/tcp
+    firewall-cmd --reload
+  fi
+fi
+
 if [[ "$SELF_SIGNED" == "true" ]]; then
   certificate_dir="/etc/ssl/opensips-sbc-ui/$DOMAIN"
   certificate_path="$certificate_dir/fullchain.pem"
@@ -137,7 +190,7 @@ else
   certificate_path="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
   certificate_key_path="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
   if [[ ! -s "$certificate_key_path" || ! -s "$certificate_path" ]]; then
-    cat > /etc/nginx/sites-available/opensips-sbc-ui-bootstrap.conf <<BOOTSTRAP_NGINX
+    cat > "$nginx_bootstrap_path" <<BOOTSTRAP_NGINX
 server {
     listen 80;
     server_name $DOMAIN;
@@ -151,21 +204,28 @@ server {
     }
 }
 BOOTSTRAP_NGINX
-    ln -sfn /etc/nginx/sites-available/opensips-sbc-ui-bootstrap.conf /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+    if [[ "$os_family" == "debian" ]]; then
+      ln -sfn "$nginx_bootstrap_path" /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+    fi
     nginx -t
     systemctl reload nginx || systemctl restart nginx
     if ! certbot certonly --webroot -w /var/www/html -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL"; then
-      rm -f /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+      rm -f "$nginx_bootstrap_path"
+      if [[ "$os_family" == "debian" ]]; then
+        rm -f /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+      fi
       systemctl reload nginx || true
       exit 1
     fi
-    rm -f /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+    rm -f "$nginx_bootstrap_path"
+    if [[ "$os_family" == "debian" ]]; then
+      rm -f /etc/nginx/sites-enabled/opensips-sbc-ui-bootstrap.conf
+    fi
   fi
 fi
 
 auth_block=""
 if [[ -n "$BASIC_AUTH_USER" && -n "$BASIC_AUTH_PASSWORD" ]]; then
-  apt-get install -y apache2-utils
   htpasswd -bc /etc/nginx/.opensips-sbc-ui.htpasswd "$BASIC_AUTH_USER" "$BASIC_AUTH_PASSWORD"
   auth_block='    auth_basic "OpenSIPS SBC UI";
     auth_basic_user_file /etc/nginx/.opensips-sbc-ui.htpasswd;'
@@ -175,12 +235,14 @@ tmp_nginx="$(mktemp)"
 sed "s#__DOMAIN__#$DOMAIN#g; s#__BACKEND_PORT__#$BACKEND_PORT#g; s#__APP_DIR__#$APP_DIR#g; s#__SSL_CERTIFICATE__#$certificate_path#g; s#__SSL_CERTIFICATE_KEY__#$certificate_key_path#g" \
   "$APP_DIR/deploy/nginx/opensips-sbc-ui.conf" > "$tmp_nginx"
 if [[ -n "$auth_block" ]]; then
-  awk -v auth="$auth_block" '{ if ($0 == "__AUTH_BLOCK__") print auth; else print }' "$tmp_nginx" > /etc/nginx/sites-available/opensips-sbc-ui.conf
+  awk -v auth="$auth_block" '{ if ($0 == "__AUTH_BLOCK__") print auth; else print }' "$tmp_nginx" > "$nginx_config_path"
 else
-  sed "/__AUTH_BLOCK__/d" "$tmp_nginx" > /etc/nginx/sites-available/opensips-sbc-ui.conf
+  sed "/__AUTH_BLOCK__/d" "$tmp_nginx" > "$nginx_config_path"
 fi
 rm -f "$tmp_nginx"
-ln -sfn /etc/nginx/sites-available/opensips-sbc-ui.conf /etc/nginx/sites-enabled/opensips-sbc-ui.conf
+if [[ "$os_family" == "debian" ]]; then
+  ln -sfn "$nginx_config_path" /etc/nginx/sites-enabled/opensips-sbc-ui.conf
+fi
 
 sed "s#__APP_DIR__#$APP_DIR#g" \
   "$APP_DIR/deploy/systemd/opensips-sbc-ui.service" > /etc/systemd/system/opensips-sbc-ui.service
@@ -190,6 +252,7 @@ systemctl enable opensips-sbc-ui
 systemctl restart opensips-sbc-ui
 
 nginx -t
+systemctl enable nginx
 systemctl reload nginx || systemctl restart nginx
 
 echo "OpenSIPS SBC UI is configured at https://$DOMAIN"

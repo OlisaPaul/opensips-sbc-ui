@@ -45,8 +45,17 @@ if [[ -z "${DB_PASSWORD:-}" ]]; then
   exit 1
 fi
 
+if command -v mariadb >/dev/null 2>&1; then
+  database_client="mariadb"
+elif command -v mysql >/dev/null 2>&1; then
+  database_client="mysql"
+else
+  echo "Install a MariaDB or MySQL command-line client before running this check."
+  exit 1
+fi
+
 mysql_cmd=(
-  mysql
+  "$database_client"
   -h "$DB_HOST"
   -P "$DB_PORT"
   -u "$DB_USER"

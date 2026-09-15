@@ -250,7 +250,10 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
       return;
     }
     setBusy(true);
-    try { trunk ? await api.updateTrunk(trunk.id, form) : await api.createTrunk(form); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); }
+    const submittedForm: TrunkInput = form.registrationEnabled
+      ? form
+      : { ...form, registrationExpiry: undefined };
+    try { trunk ? await api.updateTrunk(trunk.id, submittedForm) : await api.createTrunk(submittedForm); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); }
     catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };

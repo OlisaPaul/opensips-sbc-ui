@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 
 export class TrunkInputDto {
   @IsString()
@@ -24,6 +24,7 @@ export class TrunkInputDto {
   @IsBoolean()
   registrationEnabled!: boolean;
 
+  @ValidateIf((input: TrunkInputDto) => input.registrationEnabled)
   @IsOptional()
   @IsInt()
   @Min(60)

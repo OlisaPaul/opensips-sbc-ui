@@ -5,6 +5,7 @@ export type TrunkInput = {
   username: string;
   password?: string;
   registrationEnabled: boolean;
+  registrationExpiry?: number;
   registrationServer?: string;
   bindingUri?: string;
   providerDispatcherSet: number;
@@ -18,6 +19,7 @@ export type Trunk = {
   username: string;
   registration_server: string | null;
   registration_enabled: boolean;
+  registration_expiry: number;
   application_name: string | null;
   application_ip: string | null;
   application_port: number | null;

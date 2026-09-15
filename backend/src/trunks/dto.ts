@@ -25,6 +25,12 @@ export class TrunkInputDto {
   registrationEnabled!: boolean;
 
   @IsOptional()
+  @IsInt()
+  @Min(60)
+  @Max(86400)
+  registrationExpiry?: number;
+
+  @IsOptional()
   @IsString()
   registrationServer?: string;
 

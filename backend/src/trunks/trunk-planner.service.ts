@@ -45,6 +45,7 @@ export class TrunkPlannerService {
           password: '********',
           registrar,
           proxy: providerSocket,
+          expiry: input.registrationExpiry ?? 3600,
         },
       });
     }

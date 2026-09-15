@@ -87,6 +87,13 @@ sudo DOMAIN=sbc.internal SELF_SIGNED=true bash scripts/install-https-nginx.sh
 
 Use `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` with the installer to protect the UI at Nginx until app-level login is added.
 
+For repeat deployments, save these values in the root-owned deployment settings
+file and use the one-command wrapper described in `DEPLOYMENT.md`:
+
+```bash
+sudo bash scripts/deploy.sh
+```
+
 ## Preflight Check
 
 Before provisioning live trunks, verify the expected OpenSIPS tables and custom mapping tables:

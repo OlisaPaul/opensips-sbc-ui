@@ -75,6 +75,32 @@ sudo DOMAIN=sbc.internal SELF_SIGNED=true bash scripts/install-https-nginx.sh
 
 Your browser will warn about the private certificate unless you install/trust it locally.
 
+## Saved Deployment Settings
+
+Instead of passing the domain and password on every deployment, keep them in a
+root-owned file outside the Git checkout. Set it up once from the project root:
+
+```bash
+sudo install -d -m 700 /etc/opensips-sbc-ui
+sudo install -o root -g root -m 600 \
+  deploy/deploy.env.example /etc/opensips-sbc-ui/deploy.env
+sudo vi /etc/opensips-sbc-ui/deploy.env
+```
+
+After editing the values, future deployments require one command:
+
+```bash
+sudo bash scripts/deploy.sh
+```
+
+The wrapper reads `/etc/opensips-sbc-ui/deploy.env`, verifies that it is private
+and root-owned, then runs the standard installer. To use another settings file,
+set `DEPLOY_CONFIG` when invoking the wrapper.
+
+A service restart alone does not copy or rebuild newly pulled source code. If no
+code or deployment settings changed and only the existing backend process needs
+restarting, use `sudo systemctl restart opensips-sbc-ui`.
+
 ## Basic Password Protection
 
 Until application login is added, use Nginx basic auth:

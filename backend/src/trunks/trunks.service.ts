@@ -31,12 +31,15 @@ export class TrunksService {
 
   async list() {
     const rows = await this.database.query<TrunkRow[]>(
-      `select id, name, provider_ip, provider_port, username, registration_enabled,
+      `select t.id, t.name, t.provider_ip, t.provider_port, t.username, t.registration_enabled,
               registration_server, application_name, application_ip, application_port, access_prefix,
               strip_prefix, pilot_cli, provider_dispatcher_set, application_dispatcher_set,
-              created_at, updated_at
-       from sbc_trunks
-       order by name`,
+              created_at, updated_at,
+              coalesce((select r.expiry from registrant r
+                        where r.username = t.username and r.expiry is not null
+                        order by r.id desc limit 1), 3600) as registration_expiry
+       from sbc_trunks t
+       order by t.name`,
     );
 
     return rows.map((row) => this.toPublic(row));
@@ -151,7 +154,11 @@ export class TrunksService {
 
   private async findTrunk(id: number) {
     const rows = await this.database.query<TrunkRow[]>(
-      `select * from sbc_trunks where id = :id limit 1`,
+      `select t.*,
+              coalesce((select r.expiry from registrant r
+                        where r.username = t.username and r.expiry is not null
+                        order by r.id desc limit 1), 3600) as registration_expiry
+       from sbc_trunks t where t.id = :id limit 1`,
       { id },
     );
     if (!rows[0]) {
@@ -215,6 +222,7 @@ export class TrunksService {
     if (input.registrationEnabled) {
       const password = await this.registrationPassword(id, input, connection);
       const bindingUri = await this.registrationBindingUri(input, connection);
+      const registrationExpiry = input.registrationExpiry ?? 3600;
       const existing = await this.database.query<(RowDataPacket & { id: number })[]>(
         `select id from registrant
          where username = :username or (:previousUsername is not null and username = :previousUsername)
@@ -231,20 +239,23 @@ export class TrunksService {
         username: input.username,
         password,
         bindingUri,
+        registrationExpiry,
       };
       if (existing[0]) {
         await this.database.query(
           `update registrant
            set registrar = :registrar, proxy = :proxy, aor = :aor, username = :username,
-               password = :password, binding_uri = :bindingUri
+               password = :password, binding_uri = :bindingUri, expiry = :registrationExpiry
            where id = :id`,
           registration,
           connection,
         );
       } else {
         await this.database.query(
-          `insert into registrant (registrar, proxy, aor, third_party_registrant, username, password, binding_uri)
-           values (:registrar, :proxy, :aor, '', :username, :password, :bindingUri)`,
+          `insert into registrant
+           (registrar, proxy, aor, third_party_registrant, username, password, binding_uri, expiry)
+           values
+           (:registrar, :proxy, :aor, '', :username, :password, :bindingUri, :registrationExpiry)`,
           registration,
           connection,
         );

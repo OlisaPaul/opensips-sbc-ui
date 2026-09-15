@@ -17,9 +17,11 @@ export type Trunk = {
   provider_ip: string;
   provider_port: number;
   username: string;
+  enabled: boolean;
   registration_server: string | null;
   registration_enabled: boolean;
   registration_expiry: number;
+  binding_uri: string | null;
   application_name: string | null;
   application_ip: string | null;
   application_port: number | null;
@@ -32,6 +34,7 @@ export type Trunk = {
 
 export type TrunkStatus = {
   trunkId: number;
+  enabled: boolean;
   registration: { enabled: boolean; ok: boolean; state: string; expires: number | null; error?: string };
   provider: { ok: boolean; setId: number; destination: string; state: string; error?: string };
 };
@@ -141,6 +144,11 @@ export const api = {
     request<{ trunk: Trunk }>(`/api/trunks/${id}`, {
       method: 'PUT',
       body: JSON.stringify(input),
+    }),
+  setTrunkEnabled: (id: number, enabled: boolean) =>
+    request<{ trunk: Trunk }>(`/api/trunks/${id}/enabled`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
     }),
   trunkStatuses: () => request<TrunkStatus[]>('/api/trunks/statuses'),
   providerSets: () => request<ProviderDispatcherSets>('/api/trunks/provider-sets'),

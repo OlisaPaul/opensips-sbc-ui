@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
-import { CreateTrunkDto, PreviewTrunkDto, UpdateTrunkDto } from './dto';
+import { CreateTrunkDto, PreviewTrunkDto, SetTrunkEnabledDto, UpdateTrunkDto } from './dto';
 import { TrunkPlannerService } from './trunk-planner.service';
 import { TrunksService } from './trunks.service';
 
@@ -48,5 +48,10 @@ export class TrunksController {
   @Put(':id')
   update(@Param('id', ParseIntPipe) id: number, @Body() input: UpdateTrunkDto) {
     return this.trunks.update(id, input);
+  }
+
+  @Put(':id/enabled')
+  setEnabled(@Param('id', ParseIntPipe) id: number, @Body() input: SetTrunkEnabledDto) {
+    return this.trunks.setEnabled(id, input.enabled);
   }
 }

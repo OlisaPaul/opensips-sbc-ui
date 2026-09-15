@@ -48,3 +48,8 @@ export class TrunkInputDto {
 export class PreviewTrunkDto extends TrunkInputDto {}
 export class CreateTrunkDto extends TrunkInputDto {}
 export class UpdateTrunkDto extends TrunkInputDto {}
+
+export class SetTrunkEnabledDto {
+  @IsBoolean()
+  enabled!: boolean;
+}

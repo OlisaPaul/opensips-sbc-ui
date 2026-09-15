@@ -1,6 +1,6 @@
 import {
   Activity, ArrowDownToLine, ArrowUpFromLine, ChevronRight, CircleDot,
-  Network, Plus, RadioTower, RefreshCw, Save, Server, X,
+  Network, Plus, Power, RadioTower, RefreshCw, Save, Server, X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -78,6 +78,22 @@ export function App() {
     window.setTimeout(() => setMessage(''), 4000);
   };
 
+  const toggleTrunk = async (trunk: Trunk) => {
+    const action = trunk.enabled ? 'disable' : 'enable';
+    if (trunk.enabled && !window.confirm(`Disable ${trunk.name}? New inbound and outbound calls will stop using this trunk.`)) return;
+    setBusy(true); setError('');
+    try {
+      await api.setTrunkEnabled(trunk.id, !trunk.enabled);
+      setMessage(`${trunk.name} ${action}d.`);
+      await load();
+      window.setTimeout(() => setMessage(''), 4000);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="appShell">
       <aside className="sidebar">
@@ -104,7 +120,7 @@ export function App() {
 
         <section className="metrics">
           {section === 'trunks' && <>
-            <Metric label="Total trunks" value={trunks.length} />
+            <Metric label="Enabled trunks" value={trunks.filter((trunk) => trunk.enabled).length} />
             <Metric label="Providers active" value={Object.values(statuses).filter((item) => item.provider.ok).length} tone="green" />
             <Metric label="Registered" value={Object.values(statuses).filter((item) => item.registration.ok && item.registration.enabled).length} tone="blue" />
           </>}
@@ -120,7 +136,7 @@ export function App() {
           </>}
         </section>
 
-        {section === 'trunks' && <TrunkList rows={trunks} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'trunks', id })} />}
+        {section === 'trunks' && <TrunkList rows={trunks} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'trunks', id })} onToggle={toggleTrunk} busy={busy} />}
         {section === 'inbound' && <InboundList rows={inbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'inbound', id })} />}
         {section === 'outbound' && <OutboundList rows={outbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'outbound', id })} />}
       </main>
@@ -148,22 +164,22 @@ function Empty({ text }: { text: string }) {
   return <div className="emptyState"><Server size={34} /><h3>Nothing here yet</h3><p>{text}</p></div>;
 }
 
-function TrunkList({ rows, statuses, selected, onSelect, onEdit }: { rows: Trunk[]; statuses: Record<number, TrunkStatus>; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void }) {
+function TrunkList({ rows, statuses, selected, onSelect, onEdit, onToggle, busy }: { rows: Trunk[]; statuses: Record<number, TrunkStatus>; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void; onToggle: (trunk: Trunk) => Promise<void>; busy: boolean }) {
   if (!rows.length) return <Empty text="Add your first provider trunk to begin." />;
   return <div className="contentGrid"><div className="dataPanel"><div className="tableHead"><span>Trunk</span><span>Provider</span><span>Registration</span><span>Gateway</span><span /></div>{rows.map((trunk) => {
     const status = statuses[trunk.id];
-    return <button className={`dataRow trunkRow ${selected === trunk.id ? 'selected' : ''}`} key={trunk.id} onClick={() => onSelect(trunk.id)}>
-      <span className="primaryCell"><b>{trunk.name}</b><small>{trunk.username}</small></span>
+    return <button className={`dataRow trunkRow ${selected === trunk.id ? 'selected' : ''} ${trunk.enabled ? '' : 'disabledRow'}`} key={trunk.id} onClick={() => onSelect(trunk.id)}>
+      <span className="primaryCell"><b>{trunk.name}</b><small>{trunk.username}{trunk.enabled ? '' : ' · Trunk disabled'}</small></span>
       <span><code>{trunk.provider_ip}:{trunk.provider_port}</code><small>Set {trunk.provider_dispatcher_set}</small></span>
       <StatusPill ok={status?.registration.ok ?? false} text={status?.registration.state ?? 'Checking'} />
       <StatusPill ok={status?.provider.ok ?? false} text={status?.provider.state ?? 'Checking'} />
       <ChevronRight size={18} />
     </button>;
-  })}</div>{selected && <TrunkDetail trunk={rows.find((row) => row.id === selected)!} status={statuses[selected]} onEdit={() => onEdit(selected)} />}</div>;
+  })}</div>{selected && <TrunkDetail trunk={rows.find((row) => row.id === selected)!} status={statuses[selected]} onEdit={() => onEdit(selected)} onToggle={onToggle} busy={busy} />}</div>;
 }
 
-function TrunkDetail({ trunk, status, onEdit }: { trunk: Trunk; status?: TrunkStatus; onEdit: () => void }) {
-  return <Detail title={trunk.name} subtitle="Provider trunk" onEdit={onEdit}>
+function TrunkDetail({ trunk, status, onEdit, onToggle, busy }: { trunk: Trunk; status?: TrunkStatus; onEdit: () => void; onToggle: (trunk: Trunk) => Promise<void>; busy: boolean }) {
+  return <Detail title={trunk.name} subtitle={trunk.enabled ? 'Provider trunk · Enabled' : 'Provider trunk · Disabled'} onEdit={onEdit} secondaryAction={<button className={trunk.enabled ? 'danger' : 'successAction'} disabled={busy} onClick={() => void onToggle(trunk)}><Power size={17} />{trunk.enabled ? 'Disable trunk' : 'Enable trunk'}</button>}>
     <DetailRow label="Provider address" value={`${trunk.provider_ip}:${trunk.provider_port}`} />
     <DetailRow label="Provider set" value={trunk.provider_dispatcher_set} />
     <DetailRow label="SIP username" value={trunk.username} />
@@ -208,8 +224,8 @@ function OutboundDetail({ route, onEdit }: { route: OutboundRoute; onEdit: () =>
   </Detail>;
 }
 
-function Detail({ title, subtitle, onEdit, children }: { title: string; subtitle: string; onEdit: () => void; children: ReactNode }) {
-  return <aside className="detailPanel"><div className="detailTop"><span className="detailIcon"><Activity size={20} /></span><div><h2>{title}</h2><p>{subtitle}</p></div></div><div className="detailBody">{children}</div><button onClick={onEdit}>Edit configuration</button></aside>;
+function Detail({ title, subtitle, onEdit, secondaryAction, children }: { title: string; subtitle: string; onEdit: () => void; secondaryAction?: ReactNode; children: ReactNode }) {
+  return <aside className="detailPanel"><div className="detailTop"><span className="detailIcon"><Activity size={20} /></span><div><h2>{title}</h2><p>{subtitle}</p></div></div><div className="detailBody">{children}</div><div className="detailActions"><button onClick={onEdit}>Edit configuration</button>{secondaryAction}</div></aside>;
 }
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {

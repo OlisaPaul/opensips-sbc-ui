@@ -31,13 +31,10 @@ export class TrunksService {
 
   async list() {
     const rows = await this.database.query<TrunkRow[]>(
-      `select t.id, t.name, t.provider_ip, t.provider_port, t.username, t.registration_enabled,
-              registration_server, application_name, application_ip, application_port, access_prefix,
+      `select t.id, t.name, t.provider_ip, t.provider_port, t.username, t.enabled, t.registration_enabled,
+              t.registration_expiry, t.binding_uri, registration_server, application_name, application_ip, application_port, access_prefix,
               strip_prefix, pilot_cli, provider_dispatcher_set, application_dispatcher_set,
-              created_at, updated_at,
-              coalesce((select r.expiry from registrant r
-                        where r.username = t.username and r.expiry is not null
-                        order by r.id desc limit 1), 3600) as registration_expiry
+              created_at, updated_at
        from sbc_trunks t
        order by t.name`,
     );
@@ -57,6 +54,30 @@ export class TrunksService {
       this.mi.dispatcherStatus(),
     ]);
     return trunks.map((trunk) => this.buildStatus(trunk, registration, dispatcher));
+  }
+
+  async setEnabled(id: number, enabled: boolean) {
+    const previous = await this.findTrunk(id);
+    if (Boolean(previous.enabled) === enabled) {
+      return { trunk: this.toPublic(previous), reload: [] };
+    }
+
+    await this.database.transaction(async (connection) => {
+      await this.database.query(
+        'update sbc_trunks set enabled = :enabled where id = :id',
+        { id, enabled: enabled ? 1 : 0 },
+        connection,
+      );
+      if (enabled) {
+        await this.provisionStoredTrunk(previous, connection);
+      } else {
+        await this.deprovisionTrunk(previous, connection);
+      }
+    });
+
+    const reload = await this.mi.reloadTrunkProvisioning();
+    await this.audit.record(enabled ? 'trunk.enable' : 'trunk.disable', 'system', `trunk:${id}`, { reload });
+    return { trunk: await this.get(id), reload };
   }
 
   async providerSets() {
@@ -131,7 +152,17 @@ export class TrunksService {
     const previous = await this.findTrunk(id);
     await this.database.transaction(async (connection) => {
       await this.saveTrunk(input, connection, id);
-      await this.provisionTables(id, input, connection, previous.username);
+      if (previous.enabled) {
+        await this.provisionTables(id, input, connection, previous.username);
+      } else {
+        await this.deprovisionTrunk({
+          ...previous,
+          username: input.username,
+          provider_ip: input.providerIp,
+          provider_port: input.providerPort,
+          provider_dispatcher_set: input.providerDispatcherSet,
+        }, connection, previous.username);
+      }
     });
 
     const reload = await this.mi.reloadTrunkProvisioning();
@@ -146,7 +177,7 @@ export class TrunksService {
   async status(id: number) {
     const trunk = await this.findTrunk(id);
     const [registration, dispatcher] = await Promise.all([
-      trunk.registration_enabled ? this.mi.execute('reg_list') : Promise.resolve(null),
+      trunk.enabled && trunk.registration_enabled ? this.mi.execute('reg_list') : Promise.resolve(null),
       this.mi.dispatcherStatus(),
     ]);
     return this.buildStatus(trunk, registration, dispatcher);
@@ -154,11 +185,7 @@ export class TrunksService {
 
   private async findTrunk(id: number) {
     const rows = await this.database.query<TrunkRow[]>(
-      `select t.*,
-              coalesce((select r.expiry from registrant r
-                        where r.username = t.username and r.expiry is not null
-                        order by r.id desc limit 1), 3600) as registration_expiry
-       from sbc_trunks t where t.id = :id limit 1`,
+      'select t.* from sbc_trunks t where t.id = :id limit 1',
       { id },
     );
     if (!rows[0]) {
@@ -177,6 +204,8 @@ export class TrunksService {
       username: input.username,
       encryptedPassword,
       registrationEnabled: input.registrationEnabled ? 1 : 0,
+      registrationExpiry: input.registrationExpiry ?? 3600,
+      bindingUri: input.bindingUri?.trim() || null,
       registrationServer: input.registrationServer?.trim() || null,
       providerSet,
     };
@@ -188,6 +217,8 @@ export class TrunksService {
              username = :username,
              encrypted_password = coalesce(:encryptedPassword, encrypted_password),
              registration_enabled = :registrationEnabled,
+             registration_expiry = :registrationExpiry,
+             binding_uri = coalesce(:bindingUri, binding_uri),
              registration_server = :registrationServer,
              provider_dispatcher_set = :providerSet
          where id = :id`,
@@ -199,11 +230,11 @@ export class TrunksService {
 
     const result = await this.database.query<ResultSetHeader>(
       `insert into sbc_trunks
-       (name, provider_ip, provider_port, username, encrypted_password, registration_enabled,
-        registration_server, provider_dispatcher_set)
+       (name, provider_ip, provider_port, username, encrypted_password, enabled, registration_enabled,
+        registration_expiry, binding_uri, registration_server, provider_dispatcher_set)
        values
-       (:name, :providerIp, :providerPort, :username, :encryptedPassword, :registrationEnabled,
-        :registrationServer, :providerSet)`,
+       (:name, :providerIp, :providerPort, :username, :encryptedPassword, 1, :registrationEnabled,
+        :registrationExpiry, :bindingUri, :registrationServer, :providerSet)`,
       params,
       connection,
     );
@@ -223,6 +254,13 @@ export class TrunksService {
       const password = await this.registrationPassword(id, input, connection);
       const bindingUri = await this.registrationBindingUri(input, connection);
       const registrationExpiry = input.registrationExpiry ?? 3600;
+      await this.database.query(
+        `update sbc_trunks
+         set registration_expiry = :registrationExpiry, binding_uri = :bindingUri
+         where id = :id`,
+        { id, registrationExpiry, bindingUri },
+        connection,
+      );
       const existing = await this.database.query<(RowDataPacket & { id: number })[]>(
         `select id from registrant
          where username = :username or (:previousUsername is not null and username = :previousUsername)
@@ -271,6 +309,48 @@ export class TrunksService {
 
     await this.upsertDispatcher(providerSet, providerDestination, input.name, connection);
     await this.upsertAddress(1, input.providerIp, input.providerPort, input.username, id, connection);
+  }
+
+  private async provisionStoredTrunk(trunk: TrunkRow, connection: DbConnection) {
+    const input: UpdateTrunkDto = {
+      name: trunk.name,
+      providerIp: trunk.provider_ip,
+      providerPort: trunk.provider_port,
+      username: trunk.username,
+      registrationEnabled: Boolean(trunk.registration_enabled),
+      registrationExpiry: trunk.registration_expiry || 3600,
+      registrationServer: trunk.registration_server ?? undefined,
+      bindingUri: trunk.binding_uri ?? undefined,
+      providerDispatcherSet: trunk.provider_dispatcher_set,
+    };
+    await this.provisionTables(trunk.id, input, connection);
+  }
+
+  private async deprovisionTrunk(trunk: TrunkRow, connection: DbConnection, previousUsername?: string) {
+    await this.database.query(
+      `delete from registrant
+       where username = :username or (:previousUsername is not null and username = :previousUsername)`,
+      { username: trunk.username, previousUsername: previousUsername ?? null },
+      connection,
+    );
+
+    const otherUsers = await this.database.query<(RowDataPacket & { id: number })[]>(
+      `select id from sbc_trunks
+       where enabled = 1 and id <> :id and provider_dispatcher_set = :providerSet
+       limit 1`,
+      { id: trunk.id, providerSet: trunk.provider_dispatcher_set },
+      connection,
+    );
+    if (!otherUsers[0]) {
+      await this.database.query(
+        'delete from dispatcher where setid = :providerSet and destination = :destination',
+        {
+          providerSet: trunk.provider_dispatcher_set,
+          destination: `sip:${trunk.provider_ip}:${trunk.provider_port}`,
+        },
+        connection,
+      );
+    }
   }
 
   private async upsertAddress(
@@ -416,6 +496,7 @@ export class TrunksService {
     const { encrypted_password: _encryptedPassword, ...safe } = row;
     return {
       ...safe,
+      enabled: Boolean(row.enabled),
       registration_enabled: Boolean(row.registration_enabled),
       strip_prefix: row.strip_prefix === null ? null : Boolean(row.strip_prefix),
     };
@@ -448,18 +529,19 @@ export class TrunksService {
 
     return {
       trunkId: trunk.id,
+      enabled: Boolean(trunk.enabled),
       registration: {
-        enabled: Boolean(trunk.registration_enabled),
-        ok: !trunk.registration_enabled || (Boolean(registration?.ok) && record?.state === 'REGISTERED_STATE'),
-        state: trunk.registration_enabled ? record?.state ?? 'NOT_FOUND' : 'DISABLED',
+        enabled: Boolean(trunk.enabled && trunk.registration_enabled),
+        ok: !trunk.enabled || !trunk.registration_enabled || (Boolean(registration?.ok) && record?.state === 'REGISTERED_STATE'),
+        state: !trunk.enabled ? 'TRUNK DISABLED' : trunk.registration_enabled ? record?.state ?? 'NOT_FOUND' : 'DISABLED',
         expires: record?.expires ?? null,
         error: registration?.error,
       },
       provider: {
-        ok: Boolean(dispatcher.ok) && destination?.state?.toLowerCase() === 'active',
+        ok: Boolean(trunk.enabled) && Boolean(dispatcher.ok) && destination?.state?.toLowerCase() === 'active',
         setId: trunk.provider_dispatcher_set,
         destination: providerDestination,
-        state: destination?.state ?? 'Not found',
+        state: !trunk.enabled ? 'Trunk disabled' : destination?.state ?? 'Not found',
         error: dispatcher.error,
       },
     };

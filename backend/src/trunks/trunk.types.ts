@@ -4,9 +4,11 @@ export type Trunk = {
   provider_ip: string;
   provider_port: number;
   username: string;
+  enabled: number;
   registration_server: string | null;
   registration_enabled: number;
   registration_expiry: number;
+  binding_uri: string | null;
   application_name: string | null;
   application_ip: string | null;
   application_port: number | null;

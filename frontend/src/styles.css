@@ -65,7 +65,13 @@ button:disabled { opacity: .55; cursor: not-allowed; transform: none; }
 .detailBody { padding: 10px 0 18px; }
 .detailRow { display: flex; justify-content: space-between; gap: 16px; padding: 9px 0; font-size: 12px; }
 .detailRow span { color: #74828a; }.detailRow b { max-width: 60%; text-align: right; word-break: break-word; }
-.detailPanel > button { width: 100%; }
+.detailActions { display: grid; gap: 8px; }
+.detailActions > button { width: 100%; }
+button.danger { color: #9b2c31; border-color: #efc4c5; background: #fff7f7; }
+button.danger:hover { color: #fff; border-color: #a92d35; background: #a92d35; }
+button.successAction { color: #126552; border-color: #a9dfce; background: #effaf6; }
+button.successAction:hover { color: #fff; border-color: #117f72; background: #117f72; }
+.dataRow.disabledRow { opacity: .62; background: #f7f8f9; }
 .routeFlow { margin: 5px 0 10px; padding: 12px; border-radius: 9px; background: #f3f8f8; display: flex; align-items: center; justify-content: space-between; gap: 9px; color: #176e67; font-size: 12px; font-weight: 800; }
 .inlineError { padding: 8px; border-radius: 7px; font-size: 11px; }
 .emptyState { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 8px; color: #839098; text-align: center; }

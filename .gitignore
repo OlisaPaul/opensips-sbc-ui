@@ -4,3 +4,6 @@ dist/
 .env.local
 npm-debug.log*
 coverage/
+
+# Server-specific OpenSIPS configuration contains credentials and network data.
+deploy/opensips.cfg

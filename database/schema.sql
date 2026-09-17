@@ -9,6 +9,7 @@ create table if not exists sbc_trunks (
   registration_enabled tinyint(1) not null default 1,
   registration_expiry int not null default 3600,
   binding_uri varchar(255) null,
+  custom_pai_uri varchar(255) null,
   registration_server varchar(255) null,
   application_name varchar(128) null,
   application_ip varchar(64) null,

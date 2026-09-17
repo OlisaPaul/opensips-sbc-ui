@@ -38,6 +38,16 @@ It adds only `enabled`, `registration_expiry`, and `binding_uri` to
 `sbc_trunks`. Existing registration expiry and binding values are copied from
 the latest matching `registrant` row so a disabled trunk can be restored later.
 
+To add optional per-trunk P-Asserted-Identity URIs, apply:
+
+```bash
+sudo mysql opensips < database/migrations/003_custom_pai.sql
+```
+
+When the value is empty, OpenSIPS continues deriving P-Asserted-Identity from
+the outbound From URI. A configured value such as
+`tel:+2348139856030;user=phone` overrides only the selected trunk's PAI.
+
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 
 If a supported Node.js and npm installation already exists, including a NodeSource installation, the installer reuses it and does not ask DNF or APT to replace it.

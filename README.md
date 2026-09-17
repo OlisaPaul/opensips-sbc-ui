@@ -62,6 +62,12 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
    mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/002_trunk_enabled.sql
    ```
 
+   For optional per-trunk custom P-Asserted-Identity support, also apply:
+
+   ```bash
+   mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/003_custom_pai.sql
+   ```
+
    It only makes the old route fields in `sbc_trunks` optional. It does not change `registrant`, `dispatcher`, `address`, `did_mapping`, `did_provider_mapping`, or `prefix_mapping`.
 
 5. Run the backend:

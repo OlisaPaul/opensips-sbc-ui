@@ -14,7 +14,7 @@ type Editor = { kind: Section; id?: number } | null;
 const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   name: '', providerIp: '', providerPort: 5060, username: '', password: '',
   registrationEnabled: true, registrationExpiry: 3600,
-  registrationServer: '', bindingUri: '', providerDispatcherSet,
+  registrationServer: '', bindingUri: '', customPaiUri: '', providerDispatcherSet,
 });
 
 const newInbound = (trunks: Trunk[]): InboundRouteInput => ({
@@ -32,7 +32,7 @@ function trunkInput(trunk: Trunk): TrunkInput {
     name: trunk.name, providerIp: trunk.provider_ip, providerPort: trunk.provider_port,
     username: trunk.username, password: '', registrationEnabled: trunk.registration_enabled,
     registrationExpiry: trunk.registration_expiry ?? 3600,
-    registrationServer: trunk.registration_server ?? '', bindingUri: '', providerDispatcherSet: trunk.provider_dispatcher_set,
+    registrationServer: trunk.registration_server ?? '', bindingUri: '', customPaiUri: trunk.custom_pai_uri ?? '', providerDispatcherSet: trunk.provider_dispatcher_set,
   };
 }
 
@@ -183,6 +183,7 @@ function TrunkDetail({ trunk, status, onEdit, onToggle, busy }: { trunk: Trunk; 
     <DetailRow label="Provider address" value={`${trunk.provider_ip}:${trunk.provider_port}`} />
     <DetailRow label="Provider set" value={trunk.provider_dispatcher_set} />
     <DetailRow label="SIP username" value={trunk.username} />
+    <DetailRow label="P-Asserted-Identity" value={trunk.custom_pai_uri || 'Same as From header'} />
     <DetailRow label="Registration" value={status?.registration.state ?? 'Unknown'} />
     {trunk.registration_enabled && <DetailRow label="Registration expiry" value={`${trunk.registration_expiry} seconds`} />}
     <DetailRow label="Gateway" value={status?.provider.state ?? 'Unknown'} />
@@ -266,15 +267,16 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
       return;
     }
     setBusy(true);
-    const submittedForm: TrunkInput = form.registrationEnabled
-      ? form
-      : { ...form, registrationExpiry: undefined };
+    const normalizedForm: TrunkInput = { ...form, customPaiUri: form.customPaiUri?.trim() || undefined };
+    const submittedForm: TrunkInput = normalizedForm.registrationEnabled
+      ? normalizedForm
+      : { ...normalizedForm, registrationExpiry: undefined };
     try { trunk ? await api.updateTrunk(trunk.id, submittedForm) : await api.createTrunk(submittedForm); await onSaved(trunk ? 'Trunk updated.' : 'Trunk added.'); }
     catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
   return <Drawer title={trunk ? 'Edit trunk' : 'Add a new trunk'} description="Configure the SIP provider connection. Routes are managed separately." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
-    <FormSection title="Identity"><Field label="Trunk name"><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="AdoGlobal" /></Field><Field label="SIP username / pilot"><input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="02013313100" /></Field></FormSection>
+    <FormSection title="Identity"><Field label="Trunk name"><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="AdoGlobal" /></Field><Field label="SIP username / pilot"><input required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="02013313100" /></Field><Field label="Custom P-Asserted-Identity (optional)" hint="Complete tel: or sip: URI. Leave blank to use the same identity as the From header."><input value={form.customPaiUri ?? ''} onChange={(e) => setForm({ ...form, customPaiUri: e.target.value })} placeholder="tel:+2348139856030;user=phone" /></Field></FormSection>
     <FormSection title="Provider gateway">
       <div className="twoCols"><Field label="Provider IP"><input required value={form.providerIp} onChange={(e) => setForm({ ...form, providerIp: e.target.value })} placeholder="46.62.134.9" /></Field><Field label="Port"><input required type="number" min="1" max="65535" value={form.providerPort} onChange={(e) => setForm({ ...form, providerPort: Number(e.target.value) })} /></Field></div>
       <div className="segmented" aria-label="Provider set mode"><button type="button" className={setMode === 'existing' ? 'active' : ''} disabled={!providerSets.sets.length} onClick={() => selectMode('existing')}>Use existing set</button><button type="button" className={setMode === 'new' ? 'active' : ''} onClick={() => selectMode('new')}>Create new set</button></div>

@@ -86,6 +86,8 @@ check_column() {
     echo "Missing column: $table.$column"
     if [[ "$table" == "sbc_trunks" && ( "$column" == "enabled" || "$column" == "registration_expiry" || "$column" == "binding_uri" ) ]]; then
       echo "Run: $database_client -h $DB_HOST -P $DB_PORT -u $DB_USER -p $DB_NAME < database/migrations/002_trunk_enabled.sql"
+    elif [[ "$table" == "sbc_trunks" && "$column" == "custom_pai_uri" ]]; then
+      echo "Run: $database_client -h $DB_HOST -P $DB_PORT -u $DB_USER -p $DB_NAME < database/migrations/003_custom_pai.sql"
     fi
     exit 1
   fi
@@ -98,7 +100,7 @@ for column in grp ip mask port proto pattern context_info; do check_column addre
 for column in id start_did end_did destination_set_id description; do check_column did_mapping "$column"; done
 for column in id start_did end_did provider sipline_set_id description; do check_column did_provider_mapping "$column"; done
 for column in id prefix sipline_set_id description routing_mode strip_prefix; do check_column prefix_mapping "$column"; done
-for column in id name provider_ip provider_port username encrypted_password enabled registration_enabled registration_expiry binding_uri registration_server application_name application_ip application_port access_prefix strip_prefix pilot_cli provider_dispatcher_set application_dispatcher_set created_at updated_at; do check_column sbc_trunks "$column"; done
+for column in id name provider_ip provider_port username encrypted_password enabled registration_enabled registration_expiry binding_uri custom_pai_uri registration_server application_name application_ip application_port access_prefix strip_prefix pilot_cli provider_dispatcher_set application_dispatcher_set created_at updated_at; do check_column sbc_trunks "$column"; done
 for column in id action actor target payload_json created_at; do check_column sbc_audit_log "$column"; done
 
 for column in application_name application_ip application_port access_prefix strip_prefix pilot_cli application_dispatcher_set; do

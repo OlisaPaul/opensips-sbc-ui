@@ -9,6 +9,7 @@ export type Trunk = {
   registration_enabled: number;
   registration_expiry: number;
   binding_uri: string | null;
+  custom_pai_uri: string | null;
   application_name: string | null;
   application_ip: string | null;
   application_port: number | null;

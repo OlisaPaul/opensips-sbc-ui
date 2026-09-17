@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 
 export class TrunkInputDto {
   @IsString()
@@ -31,14 +31,24 @@ export class TrunkInputDto {
   @Max(86400)
   registrationExpiry?: number;
 
-  @IsOptional()
+  @ValidateIf((_input: TrunkInputDto, value: unknown) => value !== undefined && value !== null && value !== '')
   @IsString()
   registrationServer?: string;
 
+  @ValidateIf((_input: TrunkInputDto, value: unknown) => value !== undefined && value !== null && value !== '')
   @IsOptional()
   @IsString()
   @MaxLength(255)
   bindingUri?: string;
+
+  @ValidateIf((_input: TrunkInputDto, value: unknown) => value !== undefined && value !== null && value !== '')
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  @Matches(/^(?:tel:\+?[0-9][0-9.-]*(?:;[A-Za-z0-9._-]+(?:=[A-Za-z0-9._+-]+)?)*|sips?:[^\s<>]+)$/i, {
+    message: 'customPaiUri must be a complete tel: or sip: URI, for example tel:+2348139856030;user=phone.',
+  })
+  customPaiUri?: string;
 
   @IsInt()
   @Min(1)

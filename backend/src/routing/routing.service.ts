@@ -3,7 +3,7 @@ import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService, DbConnection } from '../database/database.service';
 import { MiService } from '../mi/mi.service';
-import { InboundRouteInputDto, OutboundRouteInputDto } from './dto';
+import { ApplicationDestinationInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
 
 type TrunkRow = RowDataPacket & {
   id: number;
@@ -38,6 +38,12 @@ type DispatcherRow = RowDataPacket & {
   description: string;
 };
 
+type ApplicationDestinationGroupRow = RowDataPacket & {
+  id: number;
+  name: string;
+  dispatcher_set_id: number;
+};
+
 type OutboundRow = RowDataPacket & {
   id: number;
   prefix: string;
@@ -60,12 +66,108 @@ export class RoutingService {
     private readonly audit: AuditService,
   ) {}
 
+  async listApplicationDestinations() {
+    const [groups, dispatchers, routes, providerSets] = await Promise.all([
+      this.database.query<ApplicationDestinationGroupRow[]>(
+        'select id, name, dispatcher_set_id from sbc_application_destination_groups order by name, id',
+      ),
+      this.database.query<DispatcherRow[]>(
+        'select id, setid, destination, state, description from dispatcher order by setid, id',
+      ),
+      this.database.query<(RowDataPacket & { destination_set_id: number })[]>(
+        'select destination_set_id from did_mapping',
+      ),
+      this.database.query<(RowDataPacket & { provider_dispatcher_set: number })[]>(
+        'select provider_dispatcher_set from sbc_trunks',
+      ),
+    ]);
+    const providerSetIds = new Set(providerSets.map((row) => Number(row.provider_dispatcher_set)));
+    const providerDestinations = new Set(
+      dispatchers.filter((row) => providerSetIds.has(Number(row.setid))).map((row) => row.destination),
+    );
+
+    return groups.map((group) => {
+      const destinations = dispatchers
+        .filter((row) => Number(row.setid) === Number(group.dispatcher_set_id))
+        .map((row) => ({
+          id: Number(row.id),
+          destination: row.destination,
+          ...this.parseSipDestination(row.destination),
+          state: Number(row.state),
+          description: row.description,
+        }));
+      const conflicts = destinations
+        .filter((destination) => providerDestinations.has(destination.destination))
+        .map((destination) => `${destination.destination} is also assigned to a provider group`);
+      if (providerSetIds.has(Number(group.dispatcher_set_id))) {
+        conflicts.unshift(`Set ${group.dispatcher_set_id} is also assigned to a provider trunk`);
+      }
+      return {
+        id: Number(group.id),
+        name: group.name,
+        dispatcherSetId: Number(group.dispatcher_set_id),
+        destinations,
+        routeCount: routes.filter((route) => Number(route.destination_set_id) === Number(group.dispatcher_set_id)).length,
+        conflicts,
+      };
+    });
+  }
+
+  async createApplicationDestination(input: ApplicationDestinationInputDto) {
+    const name = input.name.trim();
+    if (!name) throw new BadRequestException('Application destination name is required.');
+    const destination = this.formatSipDestination(input.ip, input.port);
+    const groupId = await this.database.transaction(async (connection) => {
+      const existingName = await this.database.query<(RowDataPacket & { id: number })[]>(
+        'select id from sbc_application_destination_groups where lower(name) = lower(:name) limit 1',
+        { name },
+        connection,
+      );
+      if (existingName[0]) throw new BadRequestException('An application destination with this name already exists.');
+
+      const existingDestination = await this.database.query<(RowDataPacket & { setid: number })[]>(
+        'select setid from dispatcher where destination = :destination order by id limit 1',
+        { destination },
+        connection,
+      );
+      if (existingDestination[0]) {
+        throw new BadRequestException(
+          `${destination} already belongs to dispatcher set ${existingDestination[0].setid}. Select that destination or correct the existing dispatcher data.`,
+        );
+      }
+
+      const setId = await this.nextDispatcherSetId(connection);
+      const result = await this.database.query<ResultSetHeader>(
+        `insert into sbc_application_destination_groups (name, dispatcher_set_id)
+         values (:name, :setId)`,
+        { name, setId },
+        connection,
+      );
+      await this.database.query(
+        `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
+         values (:setId, :destination, null, 0, 1, 0, '', :description)`,
+        { setId, destination, description: name.slice(0, 64) },
+        connection,
+      );
+      return result.insertId;
+    });
+
+    const reload = await this.mi.reloadProvisioning();
+    await this.audit.record('application-destination.create', 'system', `application-destination:${groupId}`, { input, reload });
+    const group = (await this.listApplicationDestinations()).find((candidate) => candidate.id === groupId);
+    if (!group) throw new NotFoundException('The application destination was created but could not be loaded.');
+    return { destination: group, reload };
+  }
+
   async listInbound() {
-    const [routes, mappings, trunks, dispatchers] = await Promise.all([
+    const [routes, mappings, trunks, dispatchers, groups] = await Promise.all([
       this.database.query<InboundRow[]>('select * from did_mapping order by start_did, end_did, id'),
       this.database.query<ProviderMappingRow[]>('select * from did_provider_mapping order by id'),
       this.listTrunkRows(),
       this.database.query<DispatcherRow[]>('select id, setid, destination, state, description from dispatcher order by id'),
+      this.database.query<ApplicationDestinationGroupRow[]>(
+        'select id, name, dispatcher_set_id from sbc_application_destination_groups order by id',
+      ),
     ]);
 
     return routes.map((route) => {
@@ -77,6 +179,7 @@ export class RoutingService {
         candidate.provider_dispatcher_set === mapping?.sipline_set_id,
       ) ?? trunks.find((candidate) => candidate.username === route.start_did);
       const destination = dispatchers.find((candidate) => candidate.setid === route.destination_set_id);
+      const group = groups.find((candidate) => Number(candidate.dispatcher_set_id) === Number(route.destination_set_id));
       const destinationMatch = destination?.destination.match(/^sip:([^:]+):(\d+)$/);
 
       return {
@@ -85,7 +188,8 @@ export class RoutingService {
         trunk_id: trunk?.id ?? null,
         trunk_name: trunk?.name ?? mapping?.provider ?? 'Unassigned',
         provider_set_id: mapping?.sipline_set_id ?? trunk?.provider_dispatcher_set ?? null,
-        application_name: destination?.description || route.description || `Set ${route.destination_set_id}`,
+        application_name: group?.name || destination?.description || route.description || `Set ${route.destination_set_id}`,
+        destination_group_id: group?.id ?? null,
         application_destination: destination?.destination ?? null,
         application_ip: destinationMatch?.[1] ?? null,
         application_port: destinationMatch ? Number(destinationMatch[2]) : null,
@@ -102,21 +206,24 @@ export class RoutingService {
   async createInbound(input: InboundRouteInputDto) {
     const routeId = await this.database.transaction(async (connection) => {
       const trunk = await this.findTrunk(input.trunkId, connection);
-      const endDid = input.endDid?.trim() || input.startDid;
-      await this.ensureInboundRangeAvailable(input.startDid, endDid, connection);
-      await this.upsertApplicationDestination(input, connection);
+      const startDid = input.startDid.trim();
+      const endDid = input.endDid?.trim() || startDid;
+      this.validateDidRange(startDid, endDid);
+      await this.ensureInboundRangeAvailable(startDid, endDid, connection);
+      const destinationGroup = await this.findApplicationDestinationGroup(input.destinationGroupId, connection);
       const result = await this.database.query<ResultSetHeader>(
         `insert into did_mapping (start_did, end_did, destination_set_id, description)
          values (:startDid, :endDid, :destinationSetId, :description)`,
         {
-          startDid: input.startDid,
+          startDid,
           endDid,
-          destinationSetId: input.destinationSetId,
-          description: (input.description?.trim() || input.applicationName).slice(0, 100),
+          destinationSetId: destinationGroup.dispatcher_set_id,
+          description: (input.description?.trim() || destinationGroup.name).slice(0, 100),
         },
         connection,
       );
-      await this.upsertProviderMapping(input.startDid, endDid, trunk, connection);
+      await this.upsertProviderMapping(startDid, endDid, trunk, connection);
+      await this.authorizeApplicationDestination(destinationGroup, startDid, connection);
       return result.insertId;
     });
 
@@ -129,9 +236,11 @@ export class RoutingService {
     const previous = await this.findInbound(id);
     await this.database.transaction(async (connection) => {
       const trunk = await this.findTrunk(input.trunkId, connection);
-      const endDid = input.endDid?.trim() || input.startDid;
-      await this.ensureInboundRangeAvailable(input.startDid, endDid, connection, id);
-      await this.upsertApplicationDestination(input, connection);
+      const startDid = input.startDid.trim();
+      const endDid = input.endDid?.trim() || startDid;
+      this.validateDidRange(startDid, endDid);
+      await this.ensureInboundRangeAvailable(startDid, endDid, connection, id);
+      const destinationGroup = await this.findApplicationDestinationGroup(input.destinationGroupId, connection);
       await this.database.query(
         `update did_mapping
          set start_did = :startDid, end_did = :endDid, destination_set_id = :destinationSetId,
@@ -139,14 +248,15 @@ export class RoutingService {
          where id = :id`,
         {
           id,
-          startDid: input.startDid,
+          startDid,
           endDid,
-          destinationSetId: input.destinationSetId,
-          description: (input.description?.trim() || input.applicationName).slice(0, 100),
+          destinationSetId: destinationGroup.dispatcher_set_id,
+          description: (input.description?.trim() || destinationGroup.name).slice(0, 100),
         },
         connection,
       );
-      await this.upsertProviderMapping(input.startDid, endDid, trunk, connection, previous);
+      await this.upsertProviderMapping(startDid, endDid, trunk, connection, previous);
+      await this.authorizeApplicationDestination(destinationGroup, startDid, connection);
     });
 
     const reload = await this.mi.reloadProvisioning();
@@ -255,15 +365,24 @@ export class RoutingService {
   }
 
   private async ensureInboundRangeAvailable(startDid: string, endDid: string, connection: DbConnection, id?: number) {
-    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
-      `select id from did_mapping
-       where start_did = :startDid and coalesce(end_did, start_did) = :endDid
-         and (:id is null or id <> :id)
-       limit 1`,
-      { startDid, endDid, id: id ?? null },
+    const rows = await this.database.query<(RowDataPacket & { id: number; start_did: string; end_did: string | null })[]>(
+      `select id, start_did, end_did from did_mapping
+       where (:id is null or id <> :id)`,
+      { id: id ?? null },
       connection,
     );
-    if (rows[0]) throw new BadRequestException('An inbound route already exists for this DID range.');
+    const requested = this.didRange(startDid, endDid);
+    const overlap = rows.find((row) => {
+      const existingEnd = row.end_did || row.start_did;
+      if (!this.compatibleDidFormats(startDid, row.start_did) || !this.compatibleDidFormats(endDid, existingEnd)) return false;
+      const existing = this.didRange(row.start_did, existingEnd);
+      return requested.start <= existing.end && requested.end >= existing.start;
+    });
+    if (overlap) {
+      throw new BadRequestException(
+        `This DID range overlaps inbound route ${overlap.id} (${overlap.start_did}–${overlap.end_did || overlap.start_did}).`,
+      );
+    }
   }
 
   private async ensurePrefixAvailable(prefix: string, connection: DbConnection, id?: number) {
@@ -275,31 +394,102 @@ export class RoutingService {
     if (rows[0]) throw new BadRequestException('An outbound route already exists for this prefix.');
   }
 
-  private async upsertApplicationDestination(input: InboundRouteInputDto, connection: DbConnection) {
-    const destination = `sip:${input.applicationIp}:${input.applicationPort}`;
-    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
-      `select id from dispatcher where setid = :setId and destination = :destination limit 1`,
-      { setId: input.destinationSetId, destination },
+  private async findApplicationDestinationGroup(id: number, connection: DbConnection) {
+    const groups = await this.database.query<ApplicationDestinationGroupRow[]>(
+      `select id, name, dispatcher_set_id
+       from sbc_application_destination_groups where id = :id limit 1`,
+      { id },
       connection,
     );
-    const params = { setId: input.destinationSetId, destination, description: input.applicationName.slice(0, 64) };
-    if (rows[0]) {
-      await this.database.query(
-        `update dispatcher set description = :description, state = 0
-         where setid = :setId and destination = :destination`,
-        params,
-        connection,
-      );
-    } else {
-      await this.database.query(
-        `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
-         values (:setId, :destination, null, 0, 1, 0, '', :description)`,
-        params,
-        connection,
-      );
+    const group = groups[0];
+    if (!group) throw new NotFoundException('Application destination not found.');
+
+    const providerSet = await this.database.query<(RowDataPacket & { id: number })[]>(
+      'select id from sbc_trunks where provider_dispatcher_set = :setId limit 1',
+      { setId: group.dispatcher_set_id },
+      connection,
+    );
+    if (providerSet[0]) {
+      throw new BadRequestException(`Destination set ${group.dispatcher_set_id} is also assigned to a provider trunk.`);
     }
 
-    await this.upsertAddress(2, input.applicationIp, input.applicationPort, input.startDid, connection);
+    const destinations = await this.database.query<DispatcherRow[]>(
+      `select id, setid, destination, state, description
+       from dispatcher where setid = :setId order by id`,
+      { setId: group.dispatcher_set_id },
+      connection,
+    );
+    if (!destinations[0]) throw new BadRequestException('The selected application destination has no dispatcher gateway.');
+
+    const duplicate = await this.database.query<(RowDataPacket & { destination: string; provider_set: number })[]>(
+      `select app.destination, provider.setid as provider_set
+       from dispatcher app
+       join dispatcher provider on provider.destination = app.destination and provider.setid <> app.setid
+       join sbc_trunks trunk on trunk.provider_dispatcher_set = provider.setid
+       where app.setid = :setId
+       limit 1`,
+      { setId: group.dispatcher_set_id },
+      connection,
+    );
+    if (duplicate[0]) {
+      throw new BadRequestException(
+        `${duplicate[0].destination} is also assigned to provider set ${duplicate[0].provider_set}. Correct the dispatcher data before using this destination.`,
+      );
+    }
+    return { ...group, destinations };
+  }
+
+  private async authorizeApplicationDestination(
+    group: ApplicationDestinationGroupRow & { destinations: DispatcherRow[] },
+    pattern: string,
+    connection: DbConnection,
+  ) {
+    const parsed = this.parseSipDestination(group.destinations[0].destination);
+    if (!parsed.ip || !parsed.port) {
+      throw new BadRequestException(`Unsupported SIP destination: ${group.destinations[0].destination}`);
+    }
+    await this.upsertAddress(2, parsed.ip, parsed.port, pattern, connection);
+  }
+
+  private async nextDispatcherSetId(connection: DbConnection) {
+    const rows = await this.database.query<(RowDataPacket & { next_set_id: number })[]>(
+      `select coalesce(max(set_id), 0) + 1 as next_set_id
+       from (
+         select setid as set_id from dispatcher
+         union all select provider_dispatcher_set from sbc_trunks
+         union all select dispatcher_set_id from sbc_application_destination_groups
+         union all select destination_set_id from did_mapping
+         union all select sipline_set_id from prefix_mapping
+       ) used_sets`,
+      {},
+      connection,
+    );
+    return Number(rows[0]?.next_set_id ?? 1);
+  }
+
+  private validateDidRange(startDid: string, endDid: string) {
+    if (!this.compatibleDidFormats(startDid, endDid)) {
+      throw new BadRequestException('Start DID and end DID must use the same format and contain the same number of digits.');
+    }
+    const range = this.didRange(startDid, endDid);
+    if (range.end < range.start) throw new BadRequestException('End DID must be greater than or equal to start DID.');
+  }
+
+  private compatibleDidFormats(left: string, right: string) {
+    return left.startsWith('+') === right.startsWith('+') && left.replace(/^\+/, '').length === right.replace(/^\+/, '').length;
+  }
+
+  private didRange(startDid: string, endDid: string) {
+    return { start: BigInt(startDid.replace(/^\+/, '')), end: BigInt(endDid.replace(/^\+/, '')) };
+  }
+
+  private formatSipDestination(ip: string, port: number) {
+    return `sip:${ip.includes(':') ? `[${ip}]` : ip}:${port}`;
+  }
+
+  private parseSipDestination(destination: string) {
+    const match = destination.match(/^sip:(?:\[([^\]]+)\]|([^:]+)):(\d+)$/);
+    return { ip: match?.[1] ?? match?.[2] ?? null, port: match ? Number(match[3]) : null };
   }
 
   private async upsertProviderMapping(

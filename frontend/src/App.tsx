@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  api, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
+  api, ApplicationDestination, ApplicationDestinationInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
   ProviderDispatcherSets, Trunk, TrunkInput, TrunkStatus,
 } from './api/client';
 
@@ -17,9 +17,9 @@ const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   registrationServer: '', bindingUri: '', customPaiUri: '', providerDispatcherSet,
 });
 
-const newInbound = (trunks: Trunk[]): InboundRouteInput => ({
-  startDid: '', endDid: '', trunkId: trunks[0]?.id ?? 0, applicationName: '',
-  applicationIp: '', applicationPort: 5060, destinationSetId: 8, description: '',
+const newInbound = (trunks: Trunk[], destinations: ApplicationDestination[]): InboundRouteInput => ({
+  startDid: '', endDid: '', trunkId: trunks[0]?.id ?? 0,
+  destinationGroupId: destinations.find((item) => !item.conflicts.length)?.id ?? 0, description: '',
 });
 
 const newOutbound = (trunks: Trunk[]): OutboundRouteInput => ({
@@ -42,6 +42,7 @@ export function App() {
   const [statuses, setStatuses] = useState<Record<number, TrunkStatus>>({});
   const [providerSets, setProviderSets] = useState<ProviderDispatcherSets>({ sets: [], usedSetIds: [], nextSetId: 1 });
   const [inbound, setInbound] = useState<InboundRoute[]>([]);
+  const [applicationDestinations, setApplicationDestinations] = useState<ApplicationDestination[]>([]);
   const [outbound, setOutbound] = useState<OutboundRoute[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [editor, setEditor] = useState<Editor>(null);
@@ -52,12 +53,13 @@ export function App() {
   const load = useCallback(async () => {
     setBusy(true); setError('');
     try {
-      const [trunkRows, statusRows, providerSetRows, inboundRows, outboundRows] = await Promise.all([
-        api.listTrunks(), api.trunkStatuses(), api.providerSets(), api.listInboundRoutes(), api.listOutboundRoutes(),
+      const [trunkRows, statusRows, providerSetRows, destinationRows, inboundRows, outboundRows] = await Promise.all([
+        api.listTrunks(), api.trunkStatuses(), api.providerSets(), api.listApplicationDestinations(), api.listInboundRoutes(), api.listOutboundRoutes(),
       ]);
       setTrunks(trunkRows);
       setStatuses(Object.fromEntries(statusRows.map((status) => [status.trunkId, status])));
       setProviderSets(providerSetRows);
+      setApplicationDestinations(destinationRows);
       setInbound(inboundRows); setOutbound(outboundRows);
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
@@ -127,7 +129,7 @@ export function App() {
           {section === 'inbound' && <>
             <Metric label="Inbound routes" value={inbound.length} />
             <Metric label="DID ranges" value={inbound.filter((route) => route.end_did !== route.start_did).length} tone="blue" />
-            <Metric label="Application sets" value={new Set(inbound.map((route) => route.destination_set_id)).size} tone="green" />
+            <Metric label="Destinations" value={new Set(inbound.map((route) => route.destination_set_id)).size} tone="green" />
           </>}
           {section === 'outbound' && <>
             <Metric label="Outbound routes" value={outbound.length} />
@@ -142,7 +144,7 @@ export function App() {
       </main>
 
       {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} providerSets={providerSets} onClose={() => setEditor(null)} onSaved={saved} />}
-      {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
+      {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} destinations={applicationDestinations} onDestinationCreated={(destination) => setApplicationDestinations((current) => [...current, destination].sort((a, b) => a.name.localeCompare(b.name)))} onClose={() => setEditor(null)} onSaved={saved} />}
       {editor?.kind === 'outbound' && <OutboundEditor route={outbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
     </div>
   );
@@ -196,7 +198,7 @@ function InboundList({ rows, selected, onSelect, onEdit }: { rows: InboundRoute[
   return <div className="contentGrid"><div className="dataPanel"><div className="tableHead inboundHead"><span>Inbound ID / DID</span><span>From trunk</span><span>Destination server</span><span /></div>{rows.map((route) => <button className={`dataRow inboundRow ${selected === route.id ? 'selected' : ''}`} key={route.id} onClick={() => onSelect(route.id)}>
     <span className="primaryCell"><b>{route.start_did}{route.end_did !== route.start_did ? ` – ${route.end_did}` : ''}</b><small>Route #{route.id}</small></span>
     <span><b>{route.trunk_name}</b><small>Provider set {route.provider_set_id ?? '—'}</small></span>
-    <span><code>{route.application_destination ?? 'Not provisioned'}</code><small>{route.application_name} · Set {route.destination_set_id}</small></span><ChevronRight size={18} />
+    <span><code>{route.application_destination ?? 'Not provisioned'}</code><small>{route.application_name}</small></span><ChevronRight size={18} />
   </button>)}</div>{selected && <InboundDetail route={rows.find((row) => row.id === selected)!} onEdit={() => onEdit(selected)} />}</div>;
 }
 
@@ -204,7 +206,7 @@ function InboundDetail({ route, onEdit }: { route: InboundRoute; onEdit: () => v
   return <Detail title={route.start_did} subtitle="Inbound call route" onEdit={onEdit}>
     <div className="routeFlow"><span>{route.trunk_name}</span><ArrowDownToLine size={18} /><span>{route.application_name}</span></div>
     <DetailRow label="End DID" value={route.end_did} /><DetailRow label="Provider set" value={route.provider_set_id ?? 'Unassigned'} />
-    <DetailRow label="Application" value={route.application_destination ?? 'Not provisioned'} /><DetailRow label="Destination set" value={route.destination_set_id} />
+    <DetailRow label="Destination group" value={route.application_name} /><DetailRow label="Application" value={route.application_destination ?? 'Not provisioned'} />
     <DetailRow label="Description" value={route.description || '—'} />
   </Detail>;
 }
@@ -301,14 +303,64 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
   </Drawer>;
 }
 
-function InboundEditor({ route, trunks, onClose, onSaved }: { route?: InboundRoute; trunks: Trunk[]; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
-  const initial = useMemo<InboundRouteInput>(() => route ? { startDid: route.start_did, endDid: route.end_did, trunkId: route.trunk_id ?? trunks[0]?.id ?? 0, applicationName: route.application_name, applicationIp: route.application_ip ?? '', applicationPort: route.application_port ?? 5060, destinationSetId: route.destination_set_id, description: route.description ?? '' } : newInbound(trunks), [route, trunks]);
-  const [form, setForm] = useState(initial); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
-  const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { route ? await api.updateInboundRoute(route.id, form) : await api.createInboundRoute(form); await onSaved(route ? 'Inbound route updated.' : 'Inbound route added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
-  return <Drawer title={route ? 'Edit inbound route' : 'Add inbound route'} description="Define which incoming number goes from a provider trunk to an application." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
+function InboundEditor({ route, trunks, destinations, onDestinationCreated, onClose, onSaved }: {
+  route?: InboundRoute;
+  trunks: Trunk[];
+  destinations: ApplicationDestination[];
+  onDestinationCreated: (destination: ApplicationDestination) => void;
+  onClose: () => void;
+  onSaved: (text: string) => Promise<void>;
+}) {
+  const initial = useMemo<InboundRouteInput>(() => route ? {
+    startDid: route.start_did,
+    endDid: route.end_did,
+    trunkId: route.trunk_id ?? trunks[0]?.id ?? 0,
+    destinationGroupId: route.destination_group_id ?? destinations.find((item) => item.dispatcherSetId === route.destination_set_id)?.id ?? 0,
+    description: route.description ?? '',
+  } : newInbound(trunks, destinations), [route, trunks, destinations]);
+  const [form, setForm] = useState(initial);
+  const [availableDestinations, setAvailableDestinations] = useState(destinations);
+  const [showNewDestination, setShowNewDestination] = useState(!destinations.length);
+  const [newDestination, setNewDestination] = useState<ApplicationDestinationInput>({ name: '', ip: '', port: 5060 });
+  const [busy, setBusy] = useState(false);
+  const [destinationBusy, setDestinationBusy] = useState(false);
+  const [error, setError] = useState('');
+  const selectedDestination = availableDestinations.find((item) => item.id === form.destinationGroupId);
+
+  const createDestination = async () => {
+    setDestinationBusy(true); setError('');
+    try {
+      const result = await api.createApplicationDestination(newDestination);
+      const created = result.destination;
+      setAvailableDestinations((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+      onDestinationCreated(created);
+      setForm((current) => ({ ...current, destinationGroupId: created.id }));
+      setShowNewDestination(false);
+      setNewDestination({ name: '', ip: '', port: 5060 });
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setDestinationBusy(false); }
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      const submittedForm = { ...form, endDid: form.endDid?.trim() || undefined };
+      route ? await api.updateInboundRoute(route.id, submittedForm) : await api.createInboundRoute(submittedForm);
+      await onSaved(route ? 'Inbound route updated.' : 'Inbound route added.');
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(false); }
+  };
+  return <Drawer title={route ? 'Edit inbound route' : 'Add inbound route'} description="Choose the provider, DID range, and named application destination. Dispatcher IDs are managed automatically." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
     {!trunks.length && <div className="toast error">Add a trunk before creating a route.</div>}
-    <FormSection title="Incoming call"><div className="twoCols"><Field label="Start DID"><input required value={form.startDid} onChange={(e) => setForm({ ...form, startDid: e.target.value })} placeholder="02013313100" /></Field><Field label="End DID (optional)"><input value={form.endDid ?? ''} onChange={(e) => setForm({ ...form, endDid: e.target.value })} placeholder="Same as start DID" /></Field></div><Field label="Incoming provider trunk"><select required value={form.trunkId} onChange={(e) => setForm({ ...form, trunkId: Number(e.target.value) })}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — set {item.provider_dispatcher_set}</option>)}</select></Field></FormSection>
-    <FormSection title="Destination application"><Field label="Server name"><input required value={form.applicationName} onChange={(e) => setForm({ ...form, applicationName: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input required value={form.applicationIp} onChange={(e) => setForm({ ...form, applicationIp: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input required type="number" min="1" max="65535" value={form.applicationPort} onChange={(e) => setForm({ ...form, applicationPort: Number(e.target.value) })} /></Field></div><Field label="Destination dispatcher set"><input required type="number" min="1" value={form.destinationSetId} onChange={(e) => setForm({ ...form, destinationSetId: Number(e.target.value) })} /></Field></FormSection>
+    <FormSection title="Incoming call">
+      <div className="twoCols"><Field label="Start DID"><input required value={form.startDid} onChange={(e) => setForm({ ...form, startDid: e.target.value })} placeholder="+2348139856030" /></Field><Field label="End DID (optional)"><input value={form.endDid ?? ''} onChange={(e) => setForm({ ...form, endDid: e.target.value })} placeholder="Same as start DID" /></Field></div>
+      <Field label="Incoming provider trunk"><select required value={form.trunkId} onChange={(e) => setForm({ ...form, trunkId: Number(e.target.value) })}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.provider_ip}</option>)}</select></Field>
+    </FormSection>
+    <FormSection title="Destination application">
+      <Field label="Destination server or group" hint="Only application destinations are shown; provider groups cannot be selected."><select required value={form.destinationGroupId} onChange={(e) => setForm({ ...form, destinationGroupId: Number(e.target.value) })}><option value={0}>Select a destination</option>{availableDestinations.map((item) => <option key={item.id} value={item.id} disabled={Boolean(item.conflicts.length)}>{applicationDestinationLabel(item)}{item.conflicts.length ? ' — needs cleanup' : ''}</option>)}</select></Field>
+      {selectedDestination && <div className={selectedDestination.conflicts.length ? 'setPreview destinationConflict' : 'setPreview'}><b>{selectedDestination.name}</b><span>{selectedDestination.destinations.map((item) => item.destination).join(', ') || 'No gateway configured'}</span><small>{selectedDestination.routeCount} inbound route{selectedDestination.routeCount === 1 ? '' : 's'} use this destination</small>{selectedDestination.conflicts.map((conflict) => <small className="conflictText" key={conflict}>{conflict}</small>)}</div>}
+      <button className="addInline" type="button" onClick={() => setShowNewDestination((value) => !value)}><Plus size={16} />{showNewDestination ? 'Cancel new destination' : 'Add destination server'}</button>
+      {showNewDestination && <div className="newDestination"><Field label="Friendly name"><input value={newDestination.name} onChange={(e) => setNewDestination({ ...newDestination, name: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input value={newDestination.ip} onChange={(e) => setNewDestination({ ...newDestination, ip: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newDestination.port} onChange={(e) => setNewDestination({ ...newDestination, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={destinationBusy || !newDestination.name || !newDestination.ip} onClick={() => void createDestination()}>{destinationBusy ? 'Creating…' : 'Create and select destination'}</button></div>}
+    </FormSection>
     <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
   </Drawer>;
 }
@@ -332,6 +384,10 @@ function providerSetLabel(set: ProviderDispatcherSets['sets'][number]) {
   const names = set.trunks.length ? set.trunks.join(', ') : set.destinations.map((item) => item.description).filter(Boolean).join(', ');
   const gateways = set.destinations.map((item) => item.destination.replace(/^sip:/, '')).join(', ');
   return [names || 'Provider set', gateways].filter(Boolean).join(' — ');
+}
+function applicationDestinationLabel(destination: ApplicationDestination) {
+  const gateways = destination.destinations.map((item) => item.destination.replace(/^sip:/, '')).join(', ');
+  return [destination.name, gateways].filter(Boolean).join(' — ');
 }
 function errorText(cause: unknown) { if (!(cause instanceof Error)) return 'Something went wrong.'; try { const parsed = JSON.parse(cause.message); return Array.isArray(parsed.message) ? parsed.message.join(' ') : parsed.message || cause.message; } catch { return cause.message; } }
 

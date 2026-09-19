@@ -81,7 +81,7 @@ export class TrunksService {
   }
 
   async providerSets() {
-    const [dispatcherRows, trunkRows, prefixRows, inboundRows, providerAddresses] = await Promise.all([
+    const [dispatcherRows, trunkRows, prefixRows, inboundRows, providerAddresses, applicationGroups] = await Promise.all([
       this.database.query<DispatcherSetRow[]>(
         'select setid, destination, description, state from dispatcher order by setid, id',
       ),
@@ -97,8 +97,12 @@ export class TrunksService {
       this.database.query<ProviderAddressRow[]>(
         'select distinct ip from address where grp = 1',
       ),
+      this.database.query<(RowDataPacket & { dispatcher_set_id: number })[]>(
+        'select dispatcher_set_id from sbc_application_destination_groups',
+      ),
     ]);
 
+    const applicationSetIds = new Set(applicationGroups.map((row) => Number(row.dispatcher_set_id)));
     const providerIps = new Set(providerAddresses.map((row) => row.ip));
     const addressMatchedIds = dispatcherRows
       .filter((row) => {
@@ -113,7 +117,7 @@ export class TrunksService {
       ...addressMatchedIds,
     ].filter((id) => Number.isInteger(id) && id > 0));
     const allUsedIds = [...new Set(dispatcherRows.map((row) => Number(row.setid)))].sort((a, b) => a - b);
-    const referencedIds = [...providerIds].sort((a, b) => a - b);
+    const referencedIds = [...providerIds].filter((id) => !applicationSetIds.has(id)).sort((a, b) => a - b);
 
     return {
       sets: referencedIds.map((setId) => ({
@@ -134,6 +138,7 @@ export class TrunksService {
     }
 
     const id = await this.database.transaction(async (connection) => {
+      await this.ensureProviderDestinationAvailable(input, connection);
       const trunkId = await this.saveTrunk(input, connection);
       await this.provisionTables(trunkId, input, connection);
       return trunkId;
@@ -151,6 +156,7 @@ export class TrunksService {
   async update(id: number, input: UpdateTrunkDto) {
     const previous = await this.findTrunk(id);
     await this.database.transaction(async (connection) => {
+      await this.ensureProviderDestinationAvailable(input, connection);
       await this.saveTrunk(input, connection, id);
       if (previous.enabled) {
         await this.provisionTables(id, input, connection, previous.username);
@@ -311,6 +317,36 @@ export class TrunksService {
 
     await this.upsertDispatcher(providerSet, providerDestination, input.name, connection);
     await this.upsertAddress(1, input.providerIp, input.providerPort, input.username, id, connection);
+  }
+
+  private async ensureProviderDestinationAvailable(input: CreateTrunkDto | UpdateTrunkDto, connection: DbConnection) {
+    const applicationSet = await this.database.query<(RowDataPacket & { name: string })[]>(
+      `select name from sbc_application_destination_groups
+       where dispatcher_set_id = :setId limit 1`,
+      { setId: input.providerDispatcherSet },
+      connection,
+    );
+    if (applicationSet[0]) {
+      throw new BadRequestException(
+        `Dispatcher set ${input.providerDispatcherSet} belongs to application destination “${applicationSet[0].name}”. Choose or create a provider set.`,
+      );
+    }
+
+    const destination = `sip:${input.providerIp}:${input.providerPort}`;
+    const applicationDestination = await this.database.query<(RowDataPacket & { name: string; dispatcher_set_id: number })[]>(
+      `select groups.name, groups.dispatcher_set_id
+       from dispatcher
+       join sbc_application_destination_groups groups on groups.dispatcher_set_id = dispatcher.setid
+       where dispatcher.destination = :destination
+       limit 1`,
+      { destination },
+      connection,
+    );
+    if (applicationDestination[0]) {
+      throw new BadRequestException(
+        `${destination} belongs to application destination “${applicationDestination[0].name}” (set ${applicationDestination[0].dispatcher_set_id}).`,
+      );
+    }
   }
 
   private async provisionStoredTrunk(trunk: TrunkRow, connection: DbConnection) {

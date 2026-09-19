@@ -47,7 +47,9 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
    mysql -h 127.0.0.1 -u opensips -p opensips < database/schema.sql
    ```
 
-   This creates only `sbc_trunks` and `sbc_audit_log`. It does not alter existing OpenSIPS or custom routing tables.
+   This creates only the app-owned `sbc_trunks`, `sbc_audit_log`, and
+   `sbc_application_destination_groups` tables. It does not alter existing
+   OpenSIPS or custom routing tables.
 
    When upgrading an existing installation to the separate trunk/inbound/outbound screens, apply the one-time app-owned migration first:
 
@@ -67,6 +69,17 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
    ```bash
    mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/003_custom_pai.sql
    ```
+
+   To replace manually entered inbound dispatcher sets with named application
+   destinations, apply:
+
+   ```bash
+   mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/004_application_destination_groups.sql
+   ```
+
+   This creates one app-owned table and imports the destination sets already
+   referenced by `did_mapping`. It does not modify existing dispatcher or DID
+   rows.
 
    It only makes the old route fields in `sbc_trunks` optional. It does not change `registrant`, `dispatcher`, `address`, `did_mapping`, `did_provider_mapping`, or `prefix_mapping`.
 

@@ -66,17 +66,37 @@ export type InboundRoute = {
   application_destination: string | null;
   application_ip: string | null;
   application_port: number | null;
+  destination_group_id: number | null;
 };
 
 export type InboundRouteInput = {
   startDid: string;
   endDid?: string;
   trunkId: number;
-  applicationName: string;
-  applicationIp: string;
-  applicationPort: number;
-  destinationSetId: number;
+  destinationGroupId: number;
   description?: string;
+};
+
+export type ApplicationDestination = {
+  id: number;
+  name: string;
+  dispatcherSetId: number;
+  destinations: Array<{
+    id: number;
+    destination: string;
+    ip: string | null;
+    port: number | null;
+    state: number;
+    description: string;
+  }>;
+  routeCount: number;
+  conflicts: string[];
+};
+
+export type ApplicationDestinationInput = {
+  name: string;
+  ip: string;
+  port: number;
 };
 
 export type OutboundRoute = {
@@ -155,6 +175,12 @@ export const api = {
   trunkStatuses: () => request<TrunkStatus[]>('/api/trunks/statuses'),
   providerSets: () => request<ProviderDispatcherSets>('/api/trunks/provider-sets'),
   status: (id: number) => request<TrunkStatus>(`/api/trunks/${id}/status`),
+  listApplicationDestinations: () => request<ApplicationDestination[]>('/api/application-destinations'),
+  createApplicationDestination: (input: ApplicationDestinationInput) =>
+    request<{ destination: ApplicationDestination }>('/api/application-destinations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   listInboundRoutes: () => request<InboundRoute[]>('/api/inbound-routes'),
   createInboundRoute: (input: InboundRouteInput) =>
     request<{ route: InboundRoute }>('/api/inbound-routes', { method: 'POST', body: JSON.stringify(input) }),

@@ -65,13 +65,16 @@ mysql_cmd=(
   "$DB_NAME"
 )
 
-required_tables=(registrant dispatcher address did_mapping did_provider_mapping prefix_mapping sbc_trunks sbc_audit_log)
+required_tables=(registrant dispatcher address did_mapping did_provider_mapping prefix_mapping sbc_trunks sbc_audit_log sbc_application_destination_groups)
 
 echo "Checking required OpenSIPS tables in $DB_NAME..."
 for table in "${required_tables[@]}"; do
   count="$("${mysql_cmd[@]}" -e "select count(*) from information_schema.tables where table_schema = database() and table_name = '$table';")"
   if [[ "$count" != "1" ]]; then
     echo "Missing table: $table"
+    if [[ "$table" == "sbc_application_destination_groups" ]]; then
+      echo "Run: $database_client -h $DB_HOST -P $DB_PORT -u $DB_USER -p $DB_NAME < database/migrations/004_application_destination_groups.sql"
+    fi
     exit 1
   fi
   echo "OK table: $table"
@@ -102,6 +105,7 @@ for column in id start_did end_did provider sipline_set_id description; do check
 for column in id prefix sipline_set_id description routing_mode strip_prefix; do check_column prefix_mapping "$column"; done
 for column in id name provider_ip provider_port username encrypted_password enabled registration_enabled registration_expiry binding_uri custom_pai_uri registration_server application_name application_ip application_port access_prefix strip_prefix pilot_cli provider_dispatcher_set application_dispatcher_set created_at updated_at; do check_column sbc_trunks "$column"; done
 for column in id action actor target payload_json created_at; do check_column sbc_audit_log "$column"; done
+for column in id name dispatcher_set_id created_at updated_at; do check_column sbc_application_destination_groups "$column"; done
 
 for column in application_name application_ip application_port access_prefix strip_prefix pilot_cli application_dispatcher_set; do
   nullable="$("${mysql_cmd[@]}" -e "select is_nullable from information_schema.columns where table_schema = database() and table_name = 'sbc_trunks' and column_name = '$column';")"

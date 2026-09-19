@@ -102,6 +102,11 @@ input:focus, select:focus { border-color: #169785; box-shadow: 0 0 0 3px #169785
 .setPreview { display: grid; gap: 4px; padding: 11px 12px; margin-top: -4px; border: 1px solid #cfe5df; border-radius: 9px; background: #f0faf7; }
 .setPreview b { color: #126f63; font-size: 12px; }.setPreview span { color: #3f5159; font-size: 11px; }.setPreview small { color: #7b898f; font-size: 10px; }
 .setNotice { padding: 10px 12px; border-left: 3px solid #3c83c8; border-radius: 5px 8px 8px 5px; color: #53656f; background: #edf6fc; font-size: 11px; line-height: 1.5; }
+.addInline { width: 100%; margin-top: 12px; border-style: dashed; color: #117f72; background: #f7fcfb; }
+.newDestination { margin-top: 12px; padding: 14px; border: 1px solid #dbe6e4; border-radius: 9px; background: #f8fbfb; }
+.newDestination > button { width: 100%; }
+.destinationConflict { border-color: #efc4c5; background: #fff7f7; }
+.conflictText { color: #9b2c31 !important; font-weight: 700; }
 .switchRow { min-height: 56px; border: 1px solid #dbe3e6; border-radius: 9px; padding: 10px 12px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .switchRow span { display: grid; gap: 4px; }.switchRow b { font-size: 12px; }.switchRow small { color: #78868e; font-size: 10px; }
 .switchRow input { width: 38px; height: 20px; accent-color: #117f72; }

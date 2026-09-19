@@ -36,3 +36,12 @@ create table if not exists sbc_audit_log (
   key idx_sbc_audit_target (target),
   key idx_sbc_audit_created_at (created_at)
 );
+
+create table if not exists sbc_application_destination_groups (
+  id bigint unsigned not null auto_increment primary key,
+  name varchar(100) not null,
+  dispatcher_set_id int not null,
+  created_at timestamp not null default current_timestamp,
+  updated_at timestamp not null default current_timestamp on update current_timestamp,
+  unique key uniq_sbc_application_destination_set (dispatcher_set_id)
+);

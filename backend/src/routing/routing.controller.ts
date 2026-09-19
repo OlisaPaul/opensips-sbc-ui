@@ -1,10 +1,20 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
-import { InboundRouteInputDto, OutboundRouteInputDto } from './dto';
+import { ApplicationDestinationInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
 import { RoutingService } from './routing.service';
 
 @Controller('api')
 export class RoutingController {
   constructor(private readonly routing: RoutingService) {}
+
+  @Get('application-destinations')
+  listApplicationDestinations() {
+    return this.routing.listApplicationDestinations();
+  }
+
+  @Post('application-destinations')
+  createApplicationDestination(@Body() input: ApplicationDestinationInputDto) {
+    return this.routing.createApplicationDestination(input);
+  }
 
   @Get('inbound-routes')
   listInbound() {

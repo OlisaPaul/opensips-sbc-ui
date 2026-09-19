@@ -9,7 +9,7 @@ Prerequisites:
 - For Let's Encrypt, the domain must resolve to this server and inbound ports 80 and 443 must be open.
 - The OpenSIPS database and the tables in `database/schema.sql` must already exist.
 
-If the preflight reports that `sbc_trunks` or `sbc_audit_log` is missing, create only these app-owned tables once:
+If the preflight reports that an app-owned table is missing on a new installation, create the app-owned tables once:
 
 ```bash
 mariadb -h 127.0.0.1 -u opensips -p opensips < database/schema.sql
@@ -47,6 +47,17 @@ sudo mysql opensips < database/migrations/003_custom_pai.sql
 When the value is empty, OpenSIPS continues deriving P-Asserted-Identity from
 the outbound From URI. A configured value such as
 `tel:+2348139856030;user=phone` overrides only the selected trunk's PAI.
+
+To enable named inbound application destinations and automatic dispatcher-set
+allocation, apply the fourth app-owned migration:
+
+```bash
+sudo mysql opensips < database/migrations/004_application_destination_groups.sql
+```
+
+It imports destination sets already referenced by `did_mapping` into the new
+app-owned catalogue. Existing `dispatcher`, `did_mapping`, and routing records
+are not changed.
 
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 

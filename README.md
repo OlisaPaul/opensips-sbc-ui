@@ -81,6 +81,16 @@ It creates and edits trunks without modifying `opensips.cfg`. Version 1 operates
    referenced by `did_mapping`. It does not modify existing dispatcher or DID
    rows.
 
+   To add the per-trunk call-recording switch, apply:
+
+   ```bash
+   mysql -h 127.0.0.1 -u opensips -p opensips < database/migrations/005_trunk_recording.sql
+   ```
+
+   Recording remains disabled for every existing trunk until explicitly
+   enabled in the UI. RTPengine must also be configured with a recording
+   method and writable recording directory.
+
    It only makes the old route fields in `sbc_trunks` optional. It does not change `registrant`, `dispatcher`, `address`, `did_mapping`, `did_provider_mapping`, or `prefix_mapping`.
 
 5. Run the backend:

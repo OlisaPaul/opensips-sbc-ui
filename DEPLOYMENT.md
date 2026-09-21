@@ -59,6 +59,57 @@ It imports destination sets already referenced by `did_mapping` into the new
 app-owned catalogue. Existing `dispatcher`, `did_mapping`, and routing records
 are not changed.
 
+To add the per-trunk call-recording switch, apply:
+
+```bash
+sudo mysql opensips < database/migrations/005_trunk_recording.sql
+```
+
+All existing trunks default to recording disabled. The UI setting affects new
+calls only.
+
+## RTPengine Recording Prerequisites
+
+The trunk switch makes OpenSIPS send `record-call=yes` on the initial RTPengine
+offer. RTPengine must be configured separately to store the media. For WAV
+output, the RTPengine recording daemon must be installed and running.
+Because the server-specific `opensips.cfg` is excluded from Git, apply the
+tracked snippets in `deploy/opensips-recording-snippets.md` to the production
+configuration.
+
+Check the installed components first:
+
+```bash
+command -v rtpengine-recording
+sudo systemctl status rtpengine-recording --no-pager
+```
+
+The main `/etc/rtpengine/rtpengine.conf` needs a recording spool and the `proc`
+recording method:
+
+```ini
+[rtpengine]
+recording-dir = /var/spool/rtpengine
+recording-method = proc
+```
+
+A typical `/etc/rtpengine/rtpengine-recording.conf` is:
+
+```ini
+[rtpengine-recording]
+table = 0
+spool-dir = /var/spool/rtpengine
+output-dir = /var/lib/rtpengine-recording
+output-storage = file
+output-format = wav
+output-mixed = 1
+```
+
+Both directories must exist and be writable by the users running RTPengine and
+its recording daemon. Restart both services after validating their exact unit
+names. Recorded calls contain sensitive personal data; configure access,
+retention, encryption, and consent requirements for the applicable jurisdiction.
+
 On RHEL-family systems, the installer configures firewalld when it is active and applies the SELinux settings required for Nginx to serve the frontend and proxy the API. Public certificates require a repository that provides Certbot; if `dnf install certbot` cannot find it, enable EPEL or use the self-signed mode.
 
 If a supported Node.js and npm installation already exists, including a NodeSource installation, the installer reuses it and does not ask DNF or APT to replace it.

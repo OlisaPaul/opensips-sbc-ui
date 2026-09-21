@@ -32,7 +32,7 @@ export class TrunksService {
   async list() {
     const rows = await this.database.query<TrunkRow[]>(
       `select t.id, t.name, t.provider_ip, t.provider_port, t.username, t.enabled, t.registration_enabled,
-              t.registration_expiry, t.binding_uri, t.custom_pai_uri, registration_server, application_name, application_ip, application_port, access_prefix,
+              t.registration_expiry, t.binding_uri, t.custom_pai_uri, t.recording_enabled, registration_server, application_name, application_ip, application_port, access_prefix,
               strip_prefix, pilot_cli, provider_dispatcher_set, application_dispatcher_set,
               created_at, updated_at
        from sbc_trunks t
@@ -213,6 +213,7 @@ export class TrunksService {
       registrationExpiry: input.registrationExpiry ?? 3600,
       bindingUri: input.bindingUri?.trim() || null,
       customPaiUri: input.customPaiUri?.trim() || null,
+      recordingEnabled: input.recordingEnabled ? 1 : 0,
       registrationServer: input.registrationServer?.trim() || null,
       providerSet,
     };
@@ -227,6 +228,7 @@ export class TrunksService {
              registration_expiry = :registrationExpiry,
              binding_uri = coalesce(:bindingUri, binding_uri),
              custom_pai_uri = :customPaiUri,
+             recording_enabled = :recordingEnabled,
              registration_server = :registrationServer,
              provider_dispatcher_set = :providerSet
          where id = :id`,
@@ -239,10 +241,10 @@ export class TrunksService {
     const result = await this.database.query<ResultSetHeader>(
       `insert into sbc_trunks
        (name, provider_ip, provider_port, username, encrypted_password, enabled, registration_enabled,
-        registration_expiry, binding_uri, custom_pai_uri, registration_server, provider_dispatcher_set)
+        registration_expiry, binding_uri, custom_pai_uri, recording_enabled, registration_server, provider_dispatcher_set)
        values
        (:name, :providerIp, :providerPort, :username, :encryptedPassword, 1, :registrationEnabled,
-        :registrationExpiry, :bindingUri, :customPaiUri, :registrationServer, :providerSet)`,
+        :registrationExpiry, :bindingUri, :customPaiUri, :recordingEnabled, :registrationServer, :providerSet)`,
       params,
       connection,
     );
@@ -360,6 +362,7 @@ export class TrunksService {
       registrationServer: trunk.registration_server ?? undefined,
       bindingUri: trunk.binding_uri ?? undefined,
       customPaiUri: trunk.custom_pai_uri ?? undefined,
+      recordingEnabled: Boolean(trunk.recording_enabled),
       providerDispatcherSet: trunk.provider_dispatcher_set,
     };
     await this.provisionTables(trunk.id, input, connection);
@@ -537,6 +540,7 @@ export class TrunksService {
       ...safe,
       enabled: Boolean(row.enabled),
       registration_enabled: Boolean(row.registration_enabled),
+      recording_enabled: Boolean(row.recording_enabled),
       strip_prefix: row.strip_prefix === null ? null : Boolean(row.strip_prefix),
     };
   }

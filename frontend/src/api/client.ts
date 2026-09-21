@@ -9,6 +9,7 @@ export type TrunkInput = {
   registrationServer?: string;
   bindingUri?: string;
   customPaiUri?: string;
+  recordingEnabled: boolean;
   providerDispatcherSet: number;
 };
 
@@ -24,6 +25,7 @@ export type Trunk = {
   registration_expiry: number;
   binding_uri: string | null;
   custom_pai_uri: string | null;
+  recording_enabled: boolean;
   application_name: string | null;
   application_ip: string | null;
   application_port: number | null;

@@ -14,7 +14,7 @@ type Editor = { kind: Section; id?: number } | null;
 const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   name: '', providerIp: '', providerPort: 5060, username: '', password: '',
   registrationEnabled: true, registrationExpiry: 3600,
-  registrationServer: '', bindingUri: '', customPaiUri: '', providerDispatcherSet,
+  registrationServer: '', bindingUri: '', customPaiUri: '', recordingEnabled: false, providerDispatcherSet,
 });
 
 const newInbound = (trunks: Trunk[], destinations: ApplicationDestination[]): InboundRouteInput => ({
@@ -32,7 +32,7 @@ function trunkInput(trunk: Trunk): TrunkInput {
     name: trunk.name, providerIp: trunk.provider_ip, providerPort: trunk.provider_port,
     username: trunk.username, password: '', registrationEnabled: trunk.registration_enabled,
     registrationExpiry: trunk.registration_expiry ?? 3600,
-    registrationServer: trunk.registration_server ?? '', bindingUri: '', customPaiUri: trunk.custom_pai_uri ?? '', providerDispatcherSet: trunk.provider_dispatcher_set,
+    registrationServer: trunk.registration_server ?? '', bindingUri: '', customPaiUri: trunk.custom_pai_uri ?? '', recordingEnabled: trunk.recording_enabled, providerDispatcherSet: trunk.provider_dispatcher_set,
   };
 }
 
@@ -186,6 +186,7 @@ function TrunkDetail({ trunk, status, onEdit, onToggle, busy }: { trunk: Trunk; 
     <DetailRow label="Provider set" value={trunk.provider_dispatcher_set} />
     <DetailRow label="SIP username" value={trunk.username} />
     <DetailRow label="P-Asserted-Identity" value={trunk.custom_pai_uri || 'Same as From header'} />
+    <DetailRow label="Call recording" value={trunk.recording_enabled ? 'Enabled' : 'Disabled'} />
     <DetailRow label="Registration" value={status?.registration.state ?? 'Unknown'} />
     {trunk.registration_enabled && <DetailRow label="Registration expiry" value={`${trunk.registration_expiry} seconds`} />}
     <DetailRow label="Gateway" value={status?.provider.state ?? 'Unknown'} />
@@ -299,6 +300,10 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
         <Field label="Registrar (optional)" hint="Defaults to the provider IP and port"><input value={form.registrationServer ?? ''} onChange={(e) => setForm({ ...form, registrationServer: e.target.value })} placeholder="sip:46.62.134.9:5060" /></Field>
         <Field label="SBC Contact URI (optional)" hint="For example sip:02013313100@10.81.0.194:5060. Leave blank to reuse an existing binding or the server setting."><input value={form.bindingUri ?? ''} onChange={(e) => setForm({ ...form, bindingUri: e.target.value })} placeholder={`sip:${form.username || 'username'}@10.81.0.194:5060`} /></Field>
       </>}
+    </FormSection>
+    <FormSection title="Call recording">
+      <label className="switchRow"><span><b>Record calls on this trunk</b><small>Records inbound and outbound calls through RTPengine. New calls use this setting immediately.</small></span><input type="checkbox" checked={form.recordingEnabled} onChange={(e) => setForm({ ...form, recordingEnabled: e.target.checked })} /></label>
+      <div className="setNotice">Recordings are produced only when the RTPengine recording service is configured and running on the SBC.</div>
     </FormSection>
   </Drawer>;
 }

@@ -50,6 +50,9 @@ export class TrunkInputDto {
   })
   customPaiUri?: string;
 
+  @IsBoolean()
+  recordingEnabled!: boolean;
+
   @IsInt()
   @Min(1)
   providerDispatcherSet!: number;

@@ -21,9 +21,11 @@ if ($avp(inbound_recording_enabled) == "1") {
 
 ## 2. Resolve recording for outbound calls
 
-In `route[DISPATCHER]`, initialize `$dlg_val(recording_enabled)` to `"0"` with
-the outbound pilot and PAI dialog values. Extend the existing `sbc_trunks`
-identity query to return `recording_enabled` as its third value:
+In `route[DISPATCHER]`, initialize `$dlg_val(recording_enabled)` to `"0"`
+**inside** `if ($dlg_val(call_direction) == "OUTGOING")`, not before it. An
+unconditional reset would erase the inbound recording decision made in
+`route[DID_MAPPING]`. Extend the existing `sbc_trunks` identity query to
+return `recording_enabled` as its third value:
 
 ```opensips
 $dlg_val(recording_enabled) = "0";

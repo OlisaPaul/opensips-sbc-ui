@@ -1,15 +1,15 @@
 import {
   Activity, ArrowDownToLine, ArrowUpFromLine, ChevronRight, CircleDot,
-  Network, Plus, Power, RadioTower, RefreshCw, Save, Server, X,
+  Download, Headphones, Network, Plus, Power, RadioTower, RefreshCw, Save, Server, X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   api, ApplicationDestination, ApplicationDestinationInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
-  ProviderDispatcherSets, Trunk, TrunkInput, TrunkStatus,
+  ProviderDispatcherSets, Recording, Trunk, TrunkInput, TrunkStatus,
 } from './api/client';
 
-type Section = 'trunks' | 'inbound' | 'outbound';
-type Editor = { kind: Section; id?: number } | null;
+type Section = 'trunks' | 'inbound' | 'outbound' | 'recordings';
+type Editor = { kind: Exclude<Section, 'recordings'>; id?: number } | null;
 
 const newTrunk = (providerDispatcherSet: number): TrunkInput => ({
   name: '', providerIp: '', providerPort: 5060, username: '', password: '',
@@ -44,6 +44,8 @@ export function App() {
   const [inbound, setInbound] = useState<InboundRoute[]>([]);
   const [applicationDestinations, setApplicationDestinations] = useState<ApplicationDestination[]>([]);
   const [outbound, setOutbound] = useState<OutboundRoute[]>([]);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [recordingsError, setRecordingsError] = useState('');
   const [selected, setSelected] = useState<number | null>(null);
   const [editor, setEditor] = useState<Editor>(null);
   const [busy, setBusy] = useState(false);
@@ -66,14 +68,20 @@ export function App() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (section !== 'recordings') return;
+    void api.listRecordings().then((rows) => { setRecordings(rows); setRecordingsError(''); })
+      .catch((cause) => setRecordingsError(errorText(cause)));
+  }, [section, busy]);
   useEffect(() => { setSelected(null); }, [section]);
 
-  const title = section === 'trunks' ? 'SIP Trunks' : section === 'inbound' ? 'Inbound Routing' : 'Outbound Routing';
+  const title = section === 'trunks' ? 'SIP Trunks' : section === 'inbound' ? 'Inbound Routing' : section === 'outbound' ? 'Outbound Routing' : 'Call Recordings';
   const subtitle = section === 'trunks'
     ? 'Manage provider connections and monitor their live OpenSIPS status.'
     : section === 'inbound'
       ? 'Route incoming DIDs from a provider trunk to an application server.'
-      : 'Send dialled prefixes through the correct provider trunk.';
+      : section === 'outbound' ? 'Send dialled prefixes through the correct provider trunk.'
+        : 'Play and download recorded calls. Left and right audio channels represent the two RTP directions.';
 
   const saved = async (text: string) => {
     setMessage(text); setEditor(null); await load();
@@ -104,6 +112,7 @@ export function App() {
           <Nav active={section === 'trunks'} icon={<Network />} label="SIP Trunks" count={trunks.length} onClick={() => setSection('trunks')} />
           <Nav active={section === 'inbound'} icon={<ArrowDownToLine />} label="Inbound Routing" count={inbound.length} onClick={() => setSection('inbound')} />
           <Nav active={section === 'outbound'} icon={<ArrowUpFromLine />} label="Outbound Routing" count={outbound.length} onClick={() => setSection('outbound')} />
+          <Nav active={section === 'recordings'} icon={<Headphones />} label="Recordings" count={recordings.length} onClick={() => setSection('recordings')} />
         </nav>
         <div className="sidebarFoot"><CircleDot size={14} /> OpenSIPS provisioning</div>
       </aside>
@@ -113,7 +122,7 @@ export function App() {
           <div><p className="eyebrow">CONFIGURATION</p><h1>{title}</h1><p>{subtitle}</p></div>
           <div className="headerActions">
             <button className="iconButton" title="Refresh data" disabled={busy} onClick={() => void load()}><RefreshCw className={busy ? 'spin' : ''} size={18} /></button>
-            <button className="primary" onClick={() => setEditor({ kind: section })}><Plus size={18} /> Add {section === 'trunks' ? 'trunk' : 'route'}</button>
+            {section !== 'recordings' && <button className="primary" onClick={() => setEditor({ kind: section })}><Plus size={18} /> Add {section === 'trunks' ? 'trunk' : 'route'}</button>}
           </div>
         </header>
 
@@ -136,11 +145,17 @@ export function App() {
             <Metric label="Provider trunks" value={new Set(outbound.map((route) => route.trunk_id).filter(Boolean)).size} tone="blue" />
             <Metric label="Strip prefix" value={outbound.filter((route) => route.strip_prefix).length} tone="green" />
           </>}
+          {section === 'recordings' && <>
+            <Metric label="Recent captures" value={recordings.length} />
+            <Metric label="Available to convert" value={recordings.filter((row) => row.playable).length} tone="green" />
+            <Metric label="Empty or oversized" value={recordings.filter((row) => !row.playable).length} tone="blue" />
+          </>}
         </section>
 
         {section === 'trunks' && <TrunkList rows={trunks} statuses={statuses} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'trunks', id })} onToggle={toggleTrunk} busy={busy} />}
         {section === 'inbound' && <InboundList rows={inbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'inbound', id })} />}
         {section === 'outbound' && <OutboundList rows={outbound} selected={selected} onSelect={setSelected} onEdit={(id) => setEditor({ kind: 'outbound', id })} />}
+        {section === 'recordings' && <RecordingsList rows={recordings} error={recordingsError} />}
       </main>
 
       {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} providerSets={providerSets} onClose={() => setEditor(null)} onSaved={saved} />}

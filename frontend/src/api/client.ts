@@ -36,6 +36,13 @@ export type Trunk = {
   application_dispatcher_set: number | null;
 };
 
+export type Recording = {
+  id: string;
+  recordedAt: string;
+  sizeBytes: number;
+  playable: boolean;
+};
+
 export type TrunkStatus = {
   trunkId: number;
   enabled: boolean;
@@ -153,6 +160,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listRecordings: () => request<Recording[]>('/api/recordings'),
+  recordingAudio: (id: string, download = false) => `/api/recordings/${encodeURIComponent(id)}/audio${download ? '?download=1' : ''}`,
   listTrunks: () => request<Trunk[]>('/api/trunks'),
   previewTrunk: (input: TrunkInput) =>
     request<ProvisionPlan>('/api/trunks/preview', {

@@ -39,6 +39,9 @@ export type Trunk = {
 export type Recording = {
   id: string;
   recordedAt: string;
+  callStartedAt: string | null;
+  callerNumber: string | null;
+  calledNumber: string | null;
   sizeBytes: number;
   playable: boolean;
 };

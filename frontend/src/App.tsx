@@ -1,6 +1,6 @@
 import {
   Activity, ArrowDownToLine, ArrowUpFromLine, ChevronRight, CircleDot,
-  Download, Headphones, Network, Plus, Power, RadioTower, RefreshCw, Save, Server, X,
+  Download, Headphones, Network, Plus, Power, RadioTower, RefreshCw, Save, Search, Server, X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -183,23 +183,42 @@ function Empty({ text }: { text: string }) {
 
 function RecordingsList({ rows, error }: { rows: Recording[]; error: string }) {
   const [query, setQuery] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [filters, setFilters] = useState({ query: '', fromDate: '', toDate: '' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playbackError, setPlaybackError] = useState(false);
-  const matches = rows.filter((row) => row.id.toLowerCase().includes(query.toLowerCase()));
+  const matches = rows.filter((row) => {
+    const search = filters.query.trim().toLowerCase();
+    const searchable = [row.id, row.callerNumber, row.calledNumber].join(' ').toLowerCase();
+    const callTime = new Date(row.callStartedAt ?? row.recordedAt).getTime();
+    return (!search || searchable.includes(search))
+      && (!filters.fromDate || callTime >= new Date(`${filters.fromDate}T00:00:00`).getTime())
+      && (!filters.toDate || callTime < new Date(`${filters.toDate}T00:00:00`).getTime() + 86_400_000);
+  });
 
   if (error) return <div className="toast error">Unable to load recordings: {error}</div>;
   return <section className="recordingsPanel">
-    <div className="recordingsToolbar"><input aria-label="Search recordings" placeholder="Search capture ID" value={query} onChange={(event) => setQuery(event.target.value)} /><span>Newest first · latest 500</span></div>
+    <form className="recordingsToolbar" onSubmit={(event) => { event.preventDefault(); setFilters({ query, fromDate, toDate }); }}>
+      <input aria-label="Search phone number or capture ID" placeholder="Caller, called number, or capture ID" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <label>From <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
+      <label>To <input type="date" min={fromDate || undefined} value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+      <button type="submit"><Search size={16} /> Search / filter</button>
+      <button type="button" onClick={() => { setQuery(''); setFromDate(''); setToDate(''); setFilters({ query: '', fromDate: '', toDate: '' }); }}>Clear</button>
+    </form>
+    <div className="recordingsCount">Showing {matches.length} of {rows.length} recent captures</div>
     {!matches.length ? <Empty text={rows.length ? 'No recordings match your search.' : 'No recordings yet. Enable recording on a trunk and place a call.'} /> : matches.map((row) => {
       const selected = selectedId === row.id;
       return <div className="recordingItem" key={row.id}>
         <button className="recordingSummary" aria-expanded={selected} onClick={() => { setSelectedId(selected ? null : row.id); setPlaybackError(false); }}>
-          <span className="primaryCell"><b>{row.id}</b><small>{new Date(row.recordedAt).toLocaleString()}</small></span>
-          <span>{(row.sizeBytes / 1024).toFixed(1)} KB</span>
+          <span className="primaryCell"><b>{row.callerNumber || 'Number unavailable'}</b><small>Caller number</small></span>
+          <span className="primaryCell"><b>{row.calledNumber || '—'}</b><small>Called number</small></span>
+          <span className="primaryCell"><b>{new Date(row.callStartedAt ?? row.recordedAt).toLocaleString()}</b><small>{row.callStartedAt ? 'Call started' : 'Capture updated'}</small></span>
           <StatusPill ok={row.playable} text={row.playable ? 'Captured' : 'Empty / too large'} />
           <ChevronRight size={18} />
         </button>
         {selected && <div className="recordingPlayer">
+          <p>Capture ID: <code>{row.id}</code> · {(row.sizeBytes / 1024).toFixed(1)} KB</p>
           {row.playable ? <>
             <p>Each audio channel represents one RTP direction.</p>
             <audio controls preload="none" src={api.recordingAudio(row.id)} onError={() => setPlaybackError(true)} />

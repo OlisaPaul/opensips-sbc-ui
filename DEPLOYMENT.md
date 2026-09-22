@@ -104,6 +104,12 @@ It supports G.711 PCMA/PCMU captures up to 40 MB and 30 minutes; unsupported
 codecs or empty captures cannot be played. The conversion does not modify the
 original PCAPs or the OpenSIPS database.
 
+The recording list matches each capture's Call-ID to the existing OpenSIPS
+`acc` table to display caller, called number, and call start time (`created`).
+The backend database user needs `SELECT` access to `acc`; no migration is
+needed. If a call has no matching accounting row yet, the UI shows its PCAP
+file time and marks the phone numbers unavailable.
+
 The backend runs as `opensips-sbc-ui` and needs read access to the PCAP folder.
 On RHEL, the top-level spool is often root-only. Grant only the necessary path
 access, without making the spool public:

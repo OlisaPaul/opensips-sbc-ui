@@ -76,6 +76,14 @@ button.successAction:hover { color: #fff; border-color: #117f72; background: #11
 .inlineError { padding: 8px; border-radius: 7px; font-size: 11px; }
 .emptyState { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 8px; color: #839098; text-align: center; }
 .emptyState h3 { color: #3c4b54; }.emptyState p { font-size: 13px; }
+.recordingsPanel { border: 1px solid #dce4e7; border-radius: 12px; background: #fff; overflow: hidden; }
+.recordingsToolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid #e3e9ec; }
+.recordingsToolbar input { max-width: 340px; }.recordingsToolbar span { color: #78868e; font-size: 12px; }
+.recordingItem { border-bottom: 1px solid #edf1f3; }.recordingItem:last-child { border-bottom: 0; }
+.recordingSummary { width: 100%; min-height: 72px; border: 0; border-radius: 0; padding: 12px 18px; display: grid; grid-template-columns: minmax(0, 1fr) 95px 130px 18px; justify-content: stretch; gap: 14px; text-align: left; font-size: 12px; }
+.recordingSummary:hover { transform: none; background: #f4fbfa; }.recordingSummary .primaryCell { min-width: 0; display: grid; gap: 4px; }.recordingSummary b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.recordingSummary small { color: #78868e; }
+.recordingPlayer { display: grid; justify-items: start; gap: 12px; padding: 16px 18px 20px; background: #f8fafb; }.recordingPlayer p { color: #596a72; font-size: 12px; }.recordingPlayer audio { width: min(100%, 540px); }
+.downloadButton { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #117f72; border-radius: 9px; padding: 10px 14px; color: #fff; background: #117f72; text-decoration: none; font-size: 12px; font-weight: 700; }
 .overlay { position: fixed; inset: 0; z-index: 20; background: #0b202775; backdrop-filter: blur(2px); display: flex; justify-content: flex-end; }
 .drawer { width: min(510px, 100vw); height: 100%; background: #fff; box-shadow: -18px 0 45px #07181d35; animation: slide .2s ease-out; display: grid; grid-template-rows: auto 1fr; }
 @keyframes slide { from { transform: translateX(30px); opacity: .5; } }

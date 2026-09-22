@@ -181,6 +181,37 @@ function Empty({ text }: { text: string }) {
   return <div className="emptyState"><Server size={34} /><h3>Nothing here yet</h3><p>{text}</p></div>;
 }
 
+function RecordingsList({ rows, error }: { rows: Recording[]; error: string }) {
+  const [query, setQuery] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState(false);
+  const matches = rows.filter((row) => row.id.toLowerCase().includes(query.toLowerCase()));
+
+  if (error) return <div className="toast error">Unable to load recordings: {error}</div>;
+  return <section className="recordingsPanel">
+    <div className="recordingsToolbar"><input aria-label="Search recordings" placeholder="Search capture ID" value={query} onChange={(event) => setQuery(event.target.value)} /><span>Newest first · latest 500</span></div>
+    {!matches.length ? <Empty text={rows.length ? 'No recordings match your search.' : 'No recordings yet. Enable recording on a trunk and place a call.'} /> : matches.map((row) => {
+      const selected = selectedId === row.id;
+      return <div className="recordingItem" key={row.id}>
+        <button className="recordingSummary" aria-expanded={selected} onClick={() => { setSelectedId(selected ? null : row.id); setPlaybackError(false); }}>
+          <span className="primaryCell"><b>{row.id}</b><small>{new Date(row.recordedAt).toLocaleString()}</small></span>
+          <span>{(row.sizeBytes / 1024).toFixed(1)} KB</span>
+          <StatusPill ok={row.playable} text={row.playable ? 'Captured' : 'Empty / too large'} />
+          <ChevronRight size={18} />
+        </button>
+        {selected && <div className="recordingPlayer">
+          {row.playable ? <>
+            <p>Each audio channel represents one RTP direction.</p>
+            <audio controls preload="none" src={api.recordingAudio(row.id)} onError={() => setPlaybackError(true)} />
+            {playbackError && <p className="inlineError">Unable to play this capture. Check that it contains G.711 PCMA/PCMU audio.</p>}
+            <a className="downloadButton" href={api.recordingAudio(row.id, true)}><Download size={16} /> Download WAV</a>
+          </> : <p>This capture is empty or exceeds the 40 MB conversion limit.</p>}
+        </div>}
+      </div>;
+    })}
+  </section>;
+}
+
 function TrunkList({ rows, statuses, selected, onSelect, onEdit, onToggle, busy }: { rows: Trunk[]; statuses: Record<number, TrunkStatus>; selected: number | null; onSelect: (id: number) => void; onEdit: (id: number) => void; onToggle: (trunk: Trunk) => Promise<void>; busy: boolean }) {
   if (!rows.length) return <Empty text="Add your first provider trunk to begin." />;
   return <div className="contentGrid"><div className="dataPanel"><div className="tableHead"><span>Trunk</span><span>Provider</span><span>Registration</span><span>Gateway</span><span /></div>{rows.map((trunk) => {

@@ -71,11 +71,82 @@ calls only.
 ## RTPengine Recording Prerequisites
 
 The trunk switch makes OpenSIPS send `record-call=yes` on the initial RTPengine
-offer. RTPengine must be configured separately to store the media. For WAV
-output, the RTPengine recording daemon must be installed and running.
+offer. RTPengine must be configured separately to store the media. Choose one
+recording method below. The in-app player uses the PCAP method; the separate
+RTPengine recording daemon uses the `proc` method.
 Because the server-specific `opensips.cfg` is excluded from Git, apply the
 tracked snippets in `deploy/opensips-recording-snippets.md` to the production
 configuration.
+
+### PCAP method: play and download from the UI
+
+For the Recordings page, RTPengine must write PCAP files. Your server already
+has captures under `/var/spool/rtpengine/pcaps`, so verify its current settings
+before making changes:
+
+```bash
+sudo grep -E '^[[:space:]]*(recording-dir|recording-method)[[:space:]]*=' \
+  /etc/rtpengine/rtpengine.conf
+sudo ls -ld /var/spool/rtpengine /var/spool/rtpengine/pcaps
+```
+
+The relevant RTPengine settings are:
+
+```ini
+recording-dir = /var/spool/rtpengine
+recording-method = pcap
+```
+
+Do not switch a running server from `proc` to `pcap` just to follow this guide
+without planning the change: it changes how recordings are produced. The UI
+converts PCAPs to stereo WAV on demand, with one RTP direction per channel.
+It supports G.711 PCMA/PCMU captures up to 40 MB and 30 minutes; unsupported
+codecs or empty captures cannot be played. The conversion does not modify the
+original PCAPs or the OpenSIPS database.
+
+The backend runs as `opensips-sbc-ui` and needs read access to the PCAP folder.
+On RHEL, the top-level spool is often root-only. Grant only the necessary path
+access, without making the spool public:
+
+```bash
+sudo dnf install -y acl
+sudo setfacl -m u:opensips-sbc-ui:--x /var/spool/rtpengine
+sudo setfacl -m u:opensips-sbc-ui:r-x /var/spool/rtpengine/pcaps
+sudo -u opensips-sbc-ui ls /var/spool/rtpengine/pcaps
+```
+
+Individual PCAP files must also be readable by this account. Check a sample
+with `sudo -u opensips-sbc-ui test -r /var/spool/rtpengine/pcaps/FILE.pcap`.
+If SELinux still denies access, inspect the audit log and add a narrowly
+scoped policy; do not disable SELinux or make the directory world-readable.
+
+Set these values in `/opt/opensips-sbc-ui/backend/.env` on the server:
+
+```ini
+RECORDINGS_ENABLED=true
+RECORDINGS_DIR=/var/spool/rtpengine
+```
+
+`RECORDINGS_DIR` is the spool root; the backend appends `/pcaps` itself. The
+existing `.env` is preserved by repeat deployments. After editing it, restart
+the backend with `sudo systemctl restart opensips-sbc-ui` and open Recordings
+in the UI. If you have updated the project code, rerun the deployment script
+from the project root first, then verify the service status.
+
+**Access control:** Recording audio is sensitive. The current recording API
+does not authenticate users itself. Configure Nginx Basic Auth with
+`BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` in the deployment settings before
+enabling the page, and keep the backend bound to `127.0.0.1`. Verify that the
+generated Nginx site contains `auth_basic` and that an unauthenticated request
+to `/api/recordings` receives HTTP 401. Do not expose this endpoint publicly
+without access control. Also define retention, encryption, and consent rules
+appropriate to your jurisdiction.
+
+### `proc` method: RTPengine recording daemon
+
+If you instead need RTPengine's separate WAV-producing recording daemon, use
+the following `proc` setup. The current Recordings page does **not** read that
+daemon's WAV output; it reads only the PCAP folder described above.
 
 Check the installed components first:
 

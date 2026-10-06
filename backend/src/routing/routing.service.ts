@@ -117,7 +117,7 @@ export class RoutingService {
     const name = input.name.trim();
     if (!name) throw new BadRequestException('Application destination name is required.');
     const destination = this.formatSipDestination(input.ip, input.port);
-    const groupId = await this.database.transaction(async (connection) => {
+    const created = await this.database.transaction(async (connection) => {
       const existingName = await this.database.query<(RowDataPacket & { id: number })[]>(
         'select id from sbc_application_destination_groups where lower(name) = lower(:name) limit 1',
         { name },
@@ -125,36 +125,64 @@ export class RoutingService {
       );
       if (existingName[0]) throw new BadRequestException('An application destination with this name already exists.');
 
-      const existingDestination = await this.database.query<(RowDataPacket & { setid: number })[]>(
-        'select setid from dispatcher where destination = :destination order by id limit 1',
+      const existingDestinations = await this.database.query<(RowDataPacket & {
+        setid: number;
+        group_id: number | null;
+        group_name: string | null;
+        provider_trunks: number;
+      })[]>(
+        `select d.setid, g.id as group_id, g.name as group_name, count(t.id) as provider_trunks
+         from dispatcher d
+         left join sbc_application_destination_groups g on g.dispatcher_set_id = d.setid
+         left join sbc_trunks t on t.provider_dispatcher_set = d.setid
+         where d.destination = :destination
+         group by d.setid, g.id, g.name
+         order by d.setid`,
         { destination },
         connection,
       );
-      if (existingDestination[0]) {
+
+      const namedDestination = existingDestinations.find((row) => row.group_id !== null);
+      if (namedDestination) {
         throw new BadRequestException(
-          `${destination} already belongs to dispatcher set ${existingDestination[0].setid}. Select that destination or correct the existing dispatcher data.`,
+          `${destination} is already available as application destination “${namedDestination.group_name}”. Refresh the destination list and select it.`,
         );
       }
 
-      const setId = await this.nextDispatcherSetId(connection);
+      const adoptableSets = existingDestinations.filter((row) => Number(row.provider_trunks) === 0);
+      if (adoptableSets.length > 1) {
+        throw new BadRequestException(
+          `${destination} exists in multiple unassigned dispatcher sets (${adoptableSets.map((row) => row.setid).join(', ')}). Correct the duplicate dispatcher data before using it.`,
+        );
+      }
+      if (existingDestinations.length && !adoptableSets.length) {
+        throw new BadRequestException(
+          `${destination} belongs to provider dispatcher set ${existingDestinations.map((row) => row.setid).join(', ')} and cannot be used as an application destination.`,
+        );
+      }
+
+      const setId = adoptableSets[0]?.setid ?? await this.nextDispatcherSetId(connection);
+
       const result = await this.database.query<ResultSetHeader>(
         `insert into sbc_application_destination_groups (name, dispatcher_set_id)
          values (:name, :setId)`,
         { name, setId },
         connection,
       );
-      await this.database.query(
-        `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
-         values (:setId, :destination, null, 0, 1, 0, '', :description)`,
-        { setId, destination, description: name.slice(0, 64) },
-        connection,
-      );
-      return result.insertId;
+      if (!adoptableSets.length) {
+        await this.database.query(
+          `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
+           values (:setId, :destination, null, 0, 1, 0, '', :description)`,
+          { setId, destination, description: name.slice(0, 64) },
+          connection,
+        );
+      }
+      return { groupId: result.insertId, setId: Number(setId), adoptedExistingSet: Boolean(adoptableSets.length) };
     });
 
     const reload = await this.mi.reloadProvisioning();
-    await this.audit.record('application-destination.create', 'system', `application-destination:${groupId}`, { input, reload });
-    const group = (await this.listApplicationDestinations()).find((candidate) => candidate.id === groupId);
+    await this.audit.record('application-destination.create', 'system', `application-destination:${created.groupId}`, { input, ...created, reload });
+    const group = (await this.listApplicationDestinations()).find((candidate) => candidate.id === created.groupId);
     if (!group) throw new NotFoundException('The application destination was created but could not be loaded.');
     return { destination: group, reload };
   }

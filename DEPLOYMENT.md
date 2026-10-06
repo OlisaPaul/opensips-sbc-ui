@@ -221,6 +221,31 @@ sudo DOMAIN=sbc.example.com EMAIL=admin@example.com bash scripts/install-https-n
 
 The installer preserves `backend/.env` on subsequent deployments, validates the database schema, rebuilds both workspaces, and restarts the backend service.
 
+### Inbound application failover
+
+An application destination group may contain a primary server followed by one
+or more failover servers. Add them from the inbound-route editor using **Add
+failover server**. The backend stores later servers with increasing dispatcher
+priority and reloads the dispatcher automatically.
+
+The production `opensips.cfg` is intentionally ignored by Git. Apply the two
+tracked blocks in `deploy/opensips-inbound-failover-snippets.md`. Incoming calls
+use dispatcher algorithm 8 (the first active destination), while
+provider-facing outbound calls retain weighted round-robin. On SIP 408, 500,
+502, 503, or 504, OpenSIPS marks the failed application destination for probing
+and retries the next server. It does not fail over business responses such as
+404, 486, or 603.
+
+Before replacing the production configuration, validate the candidate and keep
+a backup:
+
+```bash
+sudo cp -a /usr/local/etc/opensips/opensips.cfg \
+  /usr/local/etc/opensips/opensips.cfg.before-app-failover
+sudo /usr/local/sbin/opensips -C \
+  /usr/local/etc/opensips/opensips.cfg
+```
+
 The backend uses the local `/usr/bin/opensips-cli` MI transport by default. The `opensips-sbc-ui` service account must be able to run MI commands, as verified with `sudo -u opensips-sbc-ui opensips-cli -x mi reg_list`. HTTP MI remains available by setting `MI_TRANSPORT=http` and `MI_URL`.
 
 Set `SIP_BINDING_IP` and `SIP_BINDING_PORT` in the deployed `backend/.env` to the local OpenSIPS SIP listener. For example, `SIP_BINDING_IP=10.81.0.194` and `SIP_BINDING_PORT=5060`. New REGISTER contacts use this listener unless a trunk supplies an explicit SBC Contact URI.

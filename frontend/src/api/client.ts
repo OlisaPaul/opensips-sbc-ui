@@ -100,12 +100,19 @@ export type ApplicationDestination = {
     port: number | null;
     state: number;
     description: string;
+    priority: number;
   }>;
   routeCount: number;
   conflicts: string[];
 };
 
 export type ApplicationDestinationInput = {
+  name: string;
+  ip: string;
+  port: number;
+};
+
+export type ApplicationDestinationMemberInput = {
   name: string;
   ip: string;
   port: number;
@@ -192,6 +199,11 @@ export const api = {
   listApplicationDestinations: () => request<ApplicationDestination[]>('/api/application-destinations'),
   createApplicationDestination: (input: ApplicationDestinationInput) =>
     request<{ destination: ApplicationDestination }>('/api/application-destinations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  addApplicationDestinationFailover: (id: number, input: ApplicationDestinationMemberInput) =>
+    request<{ destination: ApplicationDestination }>(`/api/application-destinations/${id}/failover-servers`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),

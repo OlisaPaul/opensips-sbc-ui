@@ -42,6 +42,21 @@ export class ApplicationDestinationInputDto {
   port!: number;
 }
 
+export class ApplicationDestinationMemberInputDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(64)
+  name!: string;
+
+  @IsIP()
+  ip!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  port!: number;
+}
+
 export class OutboundRouteInputDto {
   @IsString()
   @MinLength(1)

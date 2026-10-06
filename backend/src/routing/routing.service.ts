@@ -3,7 +3,7 @@ import { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService, DbConnection } from '../database/database.service';
 import { MiService } from '../mi/mi.service';
-import { ApplicationDestinationInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
+import { ApplicationDestinationInputDto, ApplicationDestinationMemberInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
 
 type TrunkRow = RowDataPacket & {
   id: number;
@@ -36,6 +36,7 @@ type DispatcherRow = RowDataPacket & {
   destination: string;
   state: number;
   description: string;
+  priority: number;
 };
 
 type ApplicationDestinationGroupRow = RowDataPacket & {
@@ -72,7 +73,7 @@ export class RoutingService {
         'select id, name, dispatcher_set_id from sbc_application_destination_groups order by name, id',
       ),
       this.database.query<DispatcherRow[]>(
-        'select id, setid, destination, state, description from dispatcher order by setid, id',
+        'select id, setid, destination, state, description, priority from dispatcher order by setid, priority, id',
       ),
       this.database.query<(RowDataPacket & { destination_set_id: number })[]>(
         'select destination_set_id from did_mapping',
@@ -95,6 +96,7 @@ export class RoutingService {
           ...this.parseSipDestination(row.destination),
           state: Number(row.state),
           description: row.description,
+          priority: Number(row.priority),
         }));
       const conflicts = destinations
         .filter((destination) => providerDestinations.has(destination.destination))
@@ -187,12 +189,72 @@ export class RoutingService {
     return { destination: group, reload };
   }
 
+  async addApplicationDestinationFailover(groupId: number, input: ApplicationDestinationMemberInputDto) {
+    const name = input.name.trim();
+    if (!name) throw new BadRequestException('Failover server name is required.');
+    const destination = this.formatSipDestination(input.ip, input.port);
+
+    await this.database.transaction(async (connection) => {
+      const group = await this.findApplicationDestinationGroup(groupId, connection);
+      const duplicate = group.destinations.find((row) => row.destination === destination);
+      if (duplicate) throw new BadRequestException(`${destination} is already in “${group.name}”.`);
+
+      const providerOwner = await this.database.query<(RowDataPacket & { setid: number; trunk_name: string })[]>(
+        `select d.setid, t.name as trunk_name
+         from dispatcher d
+         join sbc_trunks t on t.provider_dispatcher_set = d.setid
+         where d.destination = :destination
+         limit 1`,
+        { destination },
+        connection,
+      );
+      if (providerOwner[0]) {
+        throw new BadRequestException(
+          `${destination} belongs to provider trunk “${providerOwner[0].trunk_name}” (set ${providerOwner[0].setid}) and cannot be added as an application failover server.`,
+        );
+      }
+
+      const nextPriority = Math.max(0, ...group.destinations.map((row) => Number(row.priority))) + 10;
+      await this.database.query(
+        `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
+         values (:setId, :destination, null, 0, 1, :priority, '', :description)`,
+        {
+          setId: group.dispatcher_set_id,
+          destination,
+          priority: nextPriority,
+          description: name.slice(0, 64),
+        },
+        connection,
+      );
+
+      const routes = await this.database.query<(RowDataPacket & { start_did: string })[]>(
+        'select start_did from did_mapping where destination_set_id = :setId order by id limit 1',
+        { setId: group.dispatcher_set_id },
+        connection,
+      );
+      if (routes[0]) {
+        await this.upsertAddress(2, input.ip, input.port, routes[0].start_did, connection);
+      }
+    });
+
+    const reload = await this.mi.reloadProvisioning();
+    await this.audit.record(
+      'application-destination.failover.create',
+      'system',
+      `application-destination:${groupId}`,
+      { input, reload },
+    );
+    const destinationGroup = (await this.listApplicationDestinations()).find((candidate) => candidate.id === groupId);
+    if (!destinationGroup) throw new NotFoundException('Application destination not found after adding failover server.');
+    return { destination: destinationGroup, reload };
+  }
+
   async listInbound() {
     const [routes, mappings, trunks, dispatchers, groups] = await Promise.all([
       this.database.query<InboundRow[]>('select * from did_mapping order by start_did, end_did, id'),
       this.database.query<ProviderMappingRow[]>('select * from did_provider_mapping order by id'),
       this.listTrunkRows(),
-      this.database.query<DispatcherRow[]>('select id, setid, destination, state, description from dispatcher order by id'),
+      this.database.query<DispatcherRow[]>('select id, setid, destination, state, description, priority from dispatcher order by priority, id'),
       this.database.query<ApplicationDestinationGroupRow[]>(
         'select id, name, dispatcher_set_id from sbc_application_destination_groups order by id',
       ),
@@ -296,7 +358,7 @@ export class RoutingService {
     const [routes, trunks, dispatchers, addresses] = await Promise.all([
       this.database.query<OutboundRow[]>('select * from prefix_mapping order by prefix, id'),
       this.listTrunkRows(),
-      this.database.query<DispatcherRow[]>('select id, setid, destination, state, description from dispatcher order by id'),
+      this.database.query<DispatcherRow[]>('select id, setid, destination, state, description, priority from dispatcher order by priority, id'),
       this.database.query<AddressRow[]>("select ip, pattern from address where grp = 1 and proto = 'udp' order by id"),
     ]);
 
@@ -442,8 +504,8 @@ export class RoutingService {
     }
 
     const destinations = await this.database.query<DispatcherRow[]>(
-      `select id, setid, destination, state, description
-       from dispatcher where setid = :setId order by id`,
+      `select id, setid, destination, state, description, priority
+       from dispatcher where setid = :setId order by priority, id`,
       { setId: group.dispatcher_set_id },
       connection,
     );
@@ -472,11 +534,13 @@ export class RoutingService {
     pattern: string,
     connection: DbConnection,
   ) {
-    const parsed = this.parseSipDestination(group.destinations[0].destination);
-    if (!parsed.ip || !parsed.port) {
-      throw new BadRequestException(`Unsupported SIP destination: ${group.destinations[0].destination}`);
+    for (const destination of group.destinations) {
+      const parsed = this.parseSipDestination(destination.destination);
+      if (!parsed.ip || !parsed.port) {
+        throw new BadRequestException(`Unsupported SIP destination: ${destination.destination}`);
+      }
+      await this.upsertAddress(2, parsed.ip, parsed.port, pattern, connection);
     }
-    await this.upsertAddress(2, parsed.ip, parsed.port, pattern, connection);
   }
 
   private async nextDispatcherSetId(connection: DbConnection) {

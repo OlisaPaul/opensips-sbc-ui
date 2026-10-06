@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  api, ApplicationDestination, ApplicationDestinationInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
+  api, ApplicationDestination, ApplicationDestinationInput, ApplicationDestinationMemberInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
   ProviderDispatcherSets, Recording, Trunk, TrunkInput, TrunkStatus,
 } from './api/client';
 
@@ -393,8 +393,11 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
   const [availableDestinations, setAvailableDestinations] = useState(destinations);
   const [showNewDestination, setShowNewDestination] = useState(!destinations.length);
   const [newDestination, setNewDestination] = useState<ApplicationDestinationInput>({ name: '', ip: '', port: 5060 });
+  const [showFailover, setShowFailover] = useState(false);
+  const [newFailover, setNewFailover] = useState<ApplicationDestinationMemberInput>({ name: '', ip: '', port: 5060 });
   const [busy, setBusy] = useState(false);
   const [destinationBusy, setDestinationBusy] = useState(false);
+  const [failoverBusy, setFailoverBusy] = useState(false);
   const [destinationsBusy, setDestinationsBusy] = useState(false);
   const [error, setError] = useState('');
   const selectedDestination = availableDestinations.find((item) => item.id === form.destinationGroupId);
@@ -428,6 +431,19 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
     } catch (cause) { setError(errorText(cause)); }
     finally { setDestinationBusy(false); }
   };
+  const addFailover = async () => {
+    if (!selectedDestination) return;
+    setFailoverBusy(true); setError('');
+    try {
+      const result = await api.addApplicationDestinationFailover(selectedDestination.id, newFailover);
+      const updated = result.destination;
+      setAvailableDestinations((current) => [...current.filter((item) => item.id !== updated.id), updated].sort((a, b) => a.name.localeCompare(b.name)));
+      onDestinationCreated(updated);
+      setShowFailover(false);
+      setNewFailover({ name: '', ip: '', port: 5060 });
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setFailoverBusy(false); }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('');
     try {
@@ -445,12 +461,14 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
     </FormSection>
     <FormSection title="Destination application">
       <Field label="Destination server or group" hint="Only application destinations are shown; provider groups cannot be selected."><select required value={form.destinationGroupId} onChange={(e) => setForm({ ...form, destinationGroupId: Number(e.target.value) })}><option value={0}>Select a destination</option>{availableDestinations.map((item) => <option key={item.id} value={item.id} disabled={Boolean(item.conflicts.length)}>{applicationDestinationLabel(item)}{item.conflicts.length ? ' — needs cleanup' : ''}</option>)}</select></Field>
-      {selectedDestination && <div className={selectedDestination.conflicts.length ? 'setPreview destinationConflict' : 'setPreview'}><b>{selectedDestination.name}</b><span>{selectedDestination.destinations.map((item) => item.destination).join(', ') || 'No gateway configured'}</span><small>{selectedDestination.routeCount} inbound route{selectedDestination.routeCount === 1 ? '' : 's'} use this destination</small>{selectedDestination.conflicts.map((conflict) => <small className="conflictText" key={conflict}>{conflict}</small>)}</div>}
+      {selectedDestination && <div className={selectedDestination.conflicts.length ? 'setPreview destinationConflict' : 'setPreview'}><b>{selectedDestination.name}</b><div className="destinationMembers">{selectedDestination.destinations.map((item, index) => <span key={item.id}><i>{index === 0 ? 'Primary' : `Failover ${index}`}</i>{item.description || item.destination.replace(/^sip:/, '')}<small>{item.destination.replace(/^sip:/, '')}</small></span>)}</div><small>{selectedDestination.routeCount} inbound route{selectedDestination.routeCount === 1 ? '' : 's'} use this destination</small>{selectedDestination.conflicts.map((conflict) => <small className="conflictText" key={conflict}>{conflict}</small>)}</div>}
       <div className="destinationActions">
         <button className="addInline" type="button" disabled={destinationsBusy} onClick={() => void refreshDestinations()}><RefreshCw className={destinationsBusy ? 'spin' : ''} size={16} />{destinationsBusy ? 'Refreshing…' : 'Refresh list'}</button>
-        <button className="addInline" type="button" onClick={() => setShowNewDestination((value) => !value)}><Plus size={16} />{showNewDestination ? 'Cancel new destination' : 'Add destination server'}</button>
+        <button className="addInline" type="button" onClick={() => { setShowNewDestination((value) => !value); setShowFailover(false); }}><Plus size={16} />{showNewDestination ? 'Cancel new group' : 'New destination group'}</button>
+        <button className="addInline" type="button" disabled={!selectedDestination || Boolean(selectedDestination.conflicts.length)} onClick={() => { setShowFailover((value) => !value); setShowNewDestination(false); }}><Plus size={16} />{showFailover ? 'Cancel failover' : 'Add failover server'}</button>
       </div>
       {showNewDestination && <div className="newDestination"><Field label="Friendly name"><input value={newDestination.name} onChange={(e) => setNewDestination({ ...newDestination, name: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input value={newDestination.ip} onChange={(e) => setNewDestination({ ...newDestination, ip: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newDestination.port} onChange={(e) => setNewDestination({ ...newDestination, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={destinationBusy || !newDestination.name || !newDestination.ip} onClick={() => void createDestination()}>{destinationBusy ? 'Creating…' : 'Create and select destination'}</button></div>}
+      {showFailover && selectedDestination && <div className="newDestination"><div className="setNotice">Calls try <b>{selectedDestination.destinations[0]?.description || selectedDestination.destinations[0]?.destination}</b> first. This server is tried only when the earlier destinations time out or return a server-unavailable response.</div><Field label="Failover server name"><input value={newFailover.name} onChange={(e) => setNewFailover({ ...newFailover, name: e.target.value })} placeholder="DR Server" /></Field><div className="twoCols"><Field label="Server IP"><input value={newFailover.ip} onChange={(e) => setNewFailover({ ...newFailover, ip: e.target.value })} placeholder="10.3.0.150" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newFailover.port} onChange={(e) => setNewFailover({ ...newFailover, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={failoverBusy || !newFailover.name || !newFailover.ip} onClick={() => void addFailover()}>{failoverBusy ? 'Adding…' : 'Add as next failover'}</button></div>}
     </FormSection>
     <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
   </Drawer>;

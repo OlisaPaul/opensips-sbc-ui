@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
-import { ApplicationDestinationInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
+import { ApplicationDestinationInputDto, ApplicationDestinationMemberInputDto, InboundRouteInputDto, OutboundRouteInputDto } from './dto';
 import { RoutingService } from './routing.service';
 
 @Controller('api')
@@ -14,6 +14,14 @@ export class RoutingController {
   @Post('application-destinations')
   createApplicationDestination(@Body() input: ApplicationDestinationInputDto) {
     return this.routing.createApplicationDestination(input);
+  }
+
+  @Post('application-destinations/:id/failover-servers')
+  addApplicationDestinationFailover(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() input: ApplicationDestinationMemberInputDto,
+  ) {
+    return this.routing.addApplicationDestinationFailover(id, input);
   }
 
   @Get('inbound-routes')

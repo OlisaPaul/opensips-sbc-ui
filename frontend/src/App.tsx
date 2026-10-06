@@ -159,7 +159,7 @@ export function App() {
       </main>
 
       {editor?.kind === 'trunks' && <TrunkEditor trunk={trunks.find((row) => row.id === editor.id)} providerSets={providerSets} onClose={() => setEditor(null)} onSaved={saved} />}
-      {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} destinations={applicationDestinations} onDestinationCreated={(destination) => setApplicationDestinations((current) => [...current, destination].sort((a, b) => a.name.localeCompare(b.name)))} onClose={() => setEditor(null)} onSaved={saved} />}
+      {editor?.kind === 'inbound' && <InboundEditor route={inbound.find((row) => row.id === editor.id)} trunks={trunks} destinations={applicationDestinations} onDestinationsLoaded={setApplicationDestinations} onDestinationCreated={(destination) => setApplicationDestinations((current) => [...current.filter((item) => item.id !== destination.id), destination].sort((a, b) => a.name.localeCompare(b.name)))} onClose={() => setEditor(null)} onSaved={saved} />}
       {editor?.kind === 'outbound' && <OutboundEditor route={outbound.find((row) => row.id === editor.id)} trunks={trunks} onClose={() => setEditor(null)} onSaved={saved} />}
     </div>
   );
@@ -373,10 +373,11 @@ function TrunkEditor({ trunk, providerSets, onClose, onSaved }: { trunk?: Trunk;
   </Drawer>;
 }
 
-function InboundEditor({ route, trunks, destinations, onDestinationCreated, onClose, onSaved }: {
+function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDestinationCreated, onClose, onSaved }: {
   route?: InboundRoute;
   trunks: Trunk[];
   destinations: ApplicationDestination[];
+  onDestinationsLoaded: (destinations: ApplicationDestination[]) => void;
   onDestinationCreated: (destination: ApplicationDestination) => void;
   onClose: () => void;
   onSaved: (text: string) => Promise<void>;
@@ -394,8 +395,25 @@ function InboundEditor({ route, trunks, destinations, onDestinationCreated, onCl
   const [newDestination, setNewDestination] = useState<ApplicationDestinationInput>({ name: '', ip: '', port: 5060 });
   const [busy, setBusy] = useState(false);
   const [destinationBusy, setDestinationBusy] = useState(false);
+  const [destinationsBusy, setDestinationsBusy] = useState(false);
   const [error, setError] = useState('');
   const selectedDestination = availableDestinations.find((item) => item.id === form.destinationGroupId);
+
+  const refreshDestinations = useCallback(async () => {
+    setDestinationsBusy(true); setError('');
+    try {
+      const rows = await api.listApplicationDestinations();
+      setAvailableDestinations(rows);
+      onDestinationsLoaded(rows);
+      setForm((current) => current.destinationGroupId ? current : {
+        ...current,
+        destinationGroupId: rows.find((item) => !item.conflicts.length)?.id ?? 0,
+      });
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setDestinationsBusy(false); }
+  }, [onDestinationsLoaded]);
+
+  useEffect(() => { void refreshDestinations(); }, [refreshDestinations]);
 
   const createDestination = async () => {
     setDestinationBusy(true); setError('');
@@ -428,7 +446,10 @@ function InboundEditor({ route, trunks, destinations, onDestinationCreated, onCl
     <FormSection title="Destination application">
       <Field label="Destination server or group" hint="Only application destinations are shown; provider groups cannot be selected."><select required value={form.destinationGroupId} onChange={(e) => setForm({ ...form, destinationGroupId: Number(e.target.value) })}><option value={0}>Select a destination</option>{availableDestinations.map((item) => <option key={item.id} value={item.id} disabled={Boolean(item.conflicts.length)}>{applicationDestinationLabel(item)}{item.conflicts.length ? ' — needs cleanup' : ''}</option>)}</select></Field>
       {selectedDestination && <div className={selectedDestination.conflicts.length ? 'setPreview destinationConflict' : 'setPreview'}><b>{selectedDestination.name}</b><span>{selectedDestination.destinations.map((item) => item.destination).join(', ') || 'No gateway configured'}</span><small>{selectedDestination.routeCount} inbound route{selectedDestination.routeCount === 1 ? '' : 's'} use this destination</small>{selectedDestination.conflicts.map((conflict) => <small className="conflictText" key={conflict}>{conflict}</small>)}</div>}
-      <button className="addInline" type="button" onClick={() => setShowNewDestination((value) => !value)}><Plus size={16} />{showNewDestination ? 'Cancel new destination' : 'Add destination server'}</button>
+      <div className="destinationActions">
+        <button className="addInline" type="button" disabled={destinationsBusy} onClick={() => void refreshDestinations()}><RefreshCw className={destinationsBusy ? 'spin' : ''} size={16} />{destinationsBusy ? 'Refreshing…' : 'Refresh list'}</button>
+        <button className="addInline" type="button" onClick={() => setShowNewDestination((value) => !value)}><Plus size={16} />{showNewDestination ? 'Cancel new destination' : 'Add destination server'}</button>
+      </div>
       {showNewDestination && <div className="newDestination"><Field label="Friendly name"><input value={newDestination.name} onChange={(e) => setNewDestination({ ...newDestination, name: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input value={newDestination.ip} onChange={(e) => setNewDestination({ ...newDestination, ip: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newDestination.port} onChange={(e) => setNewDestination({ ...newDestination, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={destinationBusy || !newDestination.name || !newDestination.ip} onClick={() => void createDestination()}>{destinationBusy ? 'Creating…' : 'Create and select destination'}</button></div>}
     </FormSection>
     <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>

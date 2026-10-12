@@ -327,6 +327,176 @@ The installer runs this check automatically using the deployed `backend/.env`. F
 
 ## Services
 
+### Optional passive DTMF monitor (separate from the web app)
+
+This monitor **does not change calls, discard digits, reload OpenSIPS, restart
+RTPengine, or write to the database**. It reads captured packet copies and flags
+suspected duplicate **IPv4/UDP RTP telephone-event** sequences from one configured
+provider. It does not decode in-band audio, infer unobserved keypresses, or claim
+which upstream device produced an event. The UI is not integrated with this first
+version; findings are private JSONL logs and evidence PCAPs.
+
+Two independent services are provided:
+
+- `sbc-dtmf-capture`: dumpcap collector on the SBC, with a bounded rotating ring.
+- `sbc-dtmf-worker`: unprivileged analyzer, preferably on a separate monitoring
+  server. It can also run locally for a controlled benchmark.
+
+Requirements: Node.js 20+, systemd, and dumpcap on the capture host. On RHEL,
+`sudo dnf install wireshark-cli` normally supplies dumpcap. The optional installer
+does not install packages or alter package repositories. Check `command -v node`
+and `command -v dumpcap` first. SELinux must remain enabled; investigate narrowly
+scoped denials if the collector cannot access a capture interface.
+
+Install from the updated project checkout:
+
+```bash
+sudo bash scripts/install-dtmf-monitor.sh
+sudo vi /etc/sbc-dtmf/monitor.json
+```
+
+The installer copies the worker to root-owned `/opt/sbc-dtmf`, preserves an
+existing configuration, and installs the units **without starting or enabling
+them**. This separate location is not overwritten/chowned by web deployments.
+No npm dependencies or application rebuild are needed for the monitor itself.
+Re-running this installer updates code and units but does not restart active
+monitor services; stop them first when upgrading.
+
+Replace the example provider network and SBC addresses with the addresses seen
+in your SIP/SDP and packet captures. Include both the provider's SIP signalling
+peer and its complete, confirmed RTP networks, not just a single successful
+call's media IP. For an initial local trial, relevant settings look like:
+
+```json
+{
+  "enabled": true,
+  "providerName": "Selected provider",
+  "providerNetworks": ["192.0.2.0/24"],
+  "sbcAddresses": ["198.51.100.10"],
+  "interface": "any",
+  "sipPorts": [5060],
+  "inputDir": "/var/lib/sbc-dtmf/capture",
+  "outputDir": "/var/lib/sbc-dtmf/results",
+  "captureFileKB": 100000,
+  "captureFiles": 10,
+  "captureSeconds": 60,
+  "minFreeMB": 2048,
+  "maxCalls": 250,
+  "minMatchingEvents": 3,
+  "maxDelayMs": 600,
+  "logDigits": false
+}
+```
+
+Those IPs are documentation placeholders. Do not use them unchanged. The file is
+JSON, not `backend/.env`. Confirm `/usr/bin/dumpcap` matches your installed path,
+or set `dumpcap` in the JSON. The installer resolves the Node executable in each
+unit. Changing paths also requires adjusting systemd `ReadWritePaths` /
+`ReadOnlyPaths`; initially keep the defaults.
+
+Validate, then start a trial **without enabling at boot**:
+
+```bash
+sudo -u sbc-dtmf node /opt/sbc-dtmf/cli.mjs check /etc/sbc-dtmf/monitor.json
+sudo systemctl start sbc-dtmf-worker
+sudo systemctl start sbc-dtmf-capture
+sudo systemctl status sbc-dtmf-worker sbc-dtmf-capture --no-pager
+sudo journalctl -u sbc-dtmf-worker -u sbc-dtmf-capture -n 50 --no-pager
+sudo tail -F /var/lib/sbc-dtmf/results/events.jsonl
+```
+
+The collector has only packet-capture capability; the worker has no network
+capabilities. If capture permissions fail, inspect the journal/SELinux audit
+rather than running the whole worker as root or disabling SELinux.
+
+**Resource and coverage limits:** default ring approximately 1 GB; evidence at
+most 50 files of 1 MB each; JSONL logs at most five files of 5 MB each. There can
+be small rotation/packet overshoots. The collector also prunes its own oldest
+`dtmf_*.pcapng` files across restarts, so they do not accumulate indefinitely.
+An existing large capture ring from another tool is independent and is not
+deleted by this service. The collector checks a
+2 GB free-space reserve every ten seconds and stops on low disk; the worker
+pauses on low disk. Neither daemon automatically restarts after a fatal failure.
+This is not a guarantee against another process exhausting the disk.
+
+The units use low CPU/I/O priority, collector CPU quota 15% of one core and
+192 MB memory limit, worker CPU quota 20% and 256 MB memory limit. These are
+initial safeguards, **not a promise of zero impact**. Benchmark CPU, memory,
+disk I/O, capture drops and call audio during peak traffic. Restricting collector
+CPU can itself cause monitoring packet loss; prefer remote analysis and narrower
+capture networks over increasing quotas without measuring. A worker that cannot
+keep up can miss data as the ring rotates. Check `capture_gap`,
+`coverage_warning`, `evictedCalls`, `streamLimit`, `uncorrelatedRtp`, `fragmented`,
+`truncated`, and `observedCaptureDrops` in logs, plus dumpcap's journal/drop
+summary. No observed drops is not proof that every network packet was captured.
+
+The analyzer keeps SDP/call state across files, skips recently modified files
+(default settling time 30 seconds), and validates file size/identity after
+reading. Active-file changes, lost ring segments and malformed input cause
+coverage warnings and a correlation reset. Events whose SIP setup was not
+captured, ambiguous port reuse, IP fragments, IPv6, SIP/TCP, SRTP and in-band
+audio are not analysed as DTMF. Retention is bounded to 250 calls, eight streams
+per call and 64 recent events per stream. Long idle calls can lose correlation.
+
+Detection requires at least three consecutive matching events on distinct SSRCs
+on the **same provider-to-SBC transport tuple**, within 600 ms per pair. Normal
+event repeats in one SSRC, a forwarded SBC-to-PBX copy, and a lone repeated digit
+do not produce an alert. An alert is still a **suspected anomaly**, not proof of
+caller intent. A legitimate source change or unusual signalling can require
+human review. It does not confirm what the downstream application received.
+
+Find a reported call:
+
+```bash
+sudo grep -F 'THE-SIP-CALL-ID' /var/lib/sbc-dtmf/results/events.jsonl*
+```
+
+Each anomaly log references a small `evidence-*.pcap` containing bounded SIP
+context and DTMF packets **only up to detection**, not complete call audio or
+every later digit. For a complete incident use the retained raw ring files.
+Numbers and Call-IDs are logged; digits are redacted by default. `logDigits=true`
+exposes potentially sensitive PINs/account numbers. Evidence packets contain the
+actual digit values even when JSONL digits are redacted. Keep both directories
+private, define retention/consent, and transfer evidence securely. Do not serve
+these folders directly through Nginx. Captures are excluded from Git.
+
+To stop monitoring, without affecting calls:
+
+```bash
+sudo systemctl stop sbc-dtmf-capture sbc-dtmf-worker
+```
+
+If a worker was killed (for example by its memory limit), verify it is stopped
+and remove only `/var/lib/sbc-dtmf/results/.worker.lock` before restarting. Do
+not remove the lock while another worker or offline analysis uses that output
+directory. Enable at boot only after the benchmark has passed:
+
+```bash
+sudo systemctl enable sbc-dtmf-capture sbc-dtmf-worker
+```
+
+**Off-box operation:** install the same code on the monitoring server and run
+only `sbc-dtmf-worker` there. Transfer completed captures in chronological order
+over SSH/SFTP with a dedicated, least-privileged account. Copy into temporary
+names ending `.partial`, then atomically rename to `.pcapng` only after the copy
+finishes. Keep a bounded incoming spool on that server too. Never copy the
+currently written capture. Scheduling, credentials and remote transfer are
+site-specific and are **not configured by this installer**. Missing signalling
+segments prevent reliable Call-ID correlation. A network mirror/TAP to a
+dedicated capture server is another option with less SBC capture overhead.
+
+For offline validation on any Node.js 20+ host:
+
+```bash
+node monitoring/dtmf/cli.mjs analyze /absolute/path/config.json \
+  /absolute/path/first.pcapng /absolute/path/second.pcapng
+npm run test:dtmf
+```
+
+Offline analysis works even with `enabled=false`; it does not start packet
+capture. Use a separate `outputDir` from any running worker and supply files
+in chronological order. Keep the capture files unchanged during analysis.
+
 ```bash
 sudo systemctl status opensips-sbc-ui
 sudo journalctl -u opensips-sbc-ui -f

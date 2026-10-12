@@ -1,0 +1,18 @@
+{
+  "enabled": false,
+  "providerName": "Test provider",
+  "providerNetworks": ["192.0.2.0/24"],
+  "sbcAddresses": ["198.51.100.10"],
+  "interface": "any",
+  "sipPorts": [5060],
+  "inputDir": "/var/lib/sbc-dtmf/capture",
+  "outputDir": "/var/lib/sbc-dtmf/results",
+  "captureFileKB": 100000,
+  "captureFiles": 10,
+  "captureSeconds": 60,
+  "minFreeMB": 2048,
+  "maxCalls": 250,
+  "minMatchingEvents": 3,
+  "maxDelayMs": 600,
+  "logDigits": false
+}

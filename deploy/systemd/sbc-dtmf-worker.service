@@ -1,0 +1,29 @@
+[Unit]
+Description=Passive cross-SSRC DTMF anomaly analyzer
+After=network-online.target
+
+[Service]
+Type=simple
+User=sbc-dtmf
+Group=sbc-dtmf
+UMask=0077
+ExecStart=/usr/bin/node /opt/sbc-dtmf/cli.mjs watch /etc/sbc-dtmf/monitor.json
+Restart=no
+KillMode=control-group
+TimeoutStopSec=20
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryMax=256M
+TasksMax=16
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/sbc-dtmf/results
+ReadOnlyPaths=/var/lib/sbc-dtmf/capture
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -7,3 +7,10 @@ coverage/
 
 # Server-specific OpenSIPS configuration contains credentials and network data.
 deploy/opensips.cfg
+
+# Packet captures and monitor runtime data contain caller numbers and potentially audio/PINs.
+*.pcap
+*.pcapng
+*.pcap.gz
+*.pcapng.gz
+.dtmf-test-output/

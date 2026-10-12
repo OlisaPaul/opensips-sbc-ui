@@ -1,0 +1,30 @@
+[Unit]
+Description=Passive SIP/RTP DTMF capture collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sbc-dtmf
+Group=sbc-dtmf
+UMask=0077
+ExecStart=/usr/bin/node /opt/sbc-dtmf/cli.mjs capture /etc/sbc-dtmf/monitor.json
+Restart=no
+KillMode=control-group
+TimeoutStopSec=20
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=15%
+MemoryMax=192M
+TasksMax=32
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/sbc-dtmf/capture
+RestrictAddressFamilies=AF_UNIX AF_INET AF_PACKET AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

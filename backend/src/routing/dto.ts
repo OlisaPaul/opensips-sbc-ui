@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsInt, IsIP, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsIP, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 
 export class InboundRouteInputDto {
   @IsString()
@@ -43,18 +43,26 @@ export class ApplicationDestinationInputDto {
 }
 
 export class ApplicationDestinationMemberInputDto {
+  @ValidateIf((input: ApplicationDestinationMemberInputDto) => input.existingDestinationId !== undefined)
+  @IsInt()
+  @Min(1)
+  existingDestinationId?: number;
+
+  @ValidateIf((input: ApplicationDestinationMemberInputDto) => input.existingDestinationId === undefined)
   @IsString()
   @MinLength(2)
   @MaxLength(64)
-  name!: string;
+  name?: string;
 
+  @ValidateIf((input: ApplicationDestinationMemberInputDto) => input.existingDestinationId === undefined)
   @IsIP()
-  ip!: string;
+  ip?: string;
 
+  @ValidateIf((input: ApplicationDestinationMemberInputDto) => input.existingDestinationId === undefined)
   @IsInt()
   @Min(1)
   @Max(65535)
-  port!: number;
+  port?: number;
 }
 
 export class OutboundRouteInputDto {

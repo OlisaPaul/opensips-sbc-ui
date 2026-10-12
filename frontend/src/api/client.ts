@@ -118,6 +118,10 @@ export type ApplicationDestinationMemberInput = {
   port: number;
 };
 
+export type ApplicationDestinationFailoverInput = ApplicationDestinationMemberInput | {
+  existingDestinationId: number;
+};
+
 export type OutboundRoute = {
   id: number;
   prefix: string;
@@ -202,7 +206,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  addApplicationDestinationFailover: (id: number, input: ApplicationDestinationMemberInput) =>
+  addApplicationDestinationFailover: (id: number, input: ApplicationDestinationFailoverInput) =>
     request<{ destination: ApplicationDestination }>(`/api/application-destinations/${id}/failover-servers`, {
       method: 'POST',
       body: JSON.stringify(input),

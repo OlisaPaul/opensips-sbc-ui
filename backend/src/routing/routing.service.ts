@@ -190,12 +190,54 @@ export class RoutingService {
   }
 
   async addApplicationDestinationFailover(groupId: number, input: ApplicationDestinationMemberInputDto) {
-    const name = input.name.trim();
-    if (!name) throw new BadRequestException('Failover server name is required.');
-    const destination = this.formatSipDestination(input.ip, input.port);
-
     await this.database.transaction(async (connection) => {
+      // Serialize appends to this group so concurrent saves cannot assign the same priority.
+      await this.database.query(
+        'select id from sbc_application_destination_groups where id = :id for update',
+        { id: groupId },
+        connection,
+      );
       const group = await this.findApplicationDestinationGroup(groupId, connection);
+      let name: string;
+      let ip: string;
+      let port: number;
+      let destination: string;
+      let socket: string | null = null;
+      let attrs = '';
+      let state = 0;
+      if (input.existingDestinationId !== undefined) {
+        if (input.name !== undefined || input.ip !== undefined || input.port !== undefined) {
+          throw new BadRequestException('Select an existing server or enter a new server, not both.');
+        }
+        const sources = await this.database.query<(DispatcherRow & {
+          group_id: number; group_name: string; socket: string | null; attrs: string | null;
+        })[]>(
+          `select d.id, d.setid, d.destination, d.state, d.description, d.priority, d.socket, d.attrs,
+                  g.id as group_id, g.name as group_name
+           from dispatcher d
+           join sbc_application_destination_groups g on g.dispatcher_set_id = d.setid
+           where d.id = :id limit 1`,
+          { id: input.existingDestinationId },
+          connection,
+        );
+        const source = sources[0];
+        if (!source) throw new NotFoundException('The saved application server no longer exists. Refresh the destination list.');
+        // Revalidate the source catalogue on the server; never trust an IP supplied by the dropdown.
+        await this.findApplicationDestinationGroup(Number(source.group_id), connection);
+        const parsed = this.parseSipDestination(source.destination);
+        if (!parsed.ip || !parsed.port || parsed.port < 1 || parsed.port > 65535) {
+          throw new BadRequestException('This saved server has an unsupported SIP destination. Correct it before adding failover.');
+        }
+        destination = source.destination;
+        ip = parsed.ip; port = parsed.port;
+        name = source.description?.trim() || source.group_name;
+        socket = source.socket; attrs = source.attrs ?? ''; state = Number(source.state);
+      } else {
+        name = input.name?.trim() ?? '';
+        if (!name || !input.ip || !input.port) throw new BadRequestException('Failover server name, IP and port are required.');
+        ip = input.ip; port = input.port;
+        destination = this.formatSipDestination(ip, port);
+      }
       const duplicate = group.destinations.find((row) => row.destination === destination);
       if (duplicate) throw new BadRequestException(`${destination} is already in “${group.name}”.`);
 
@@ -217,10 +259,13 @@ export class RoutingService {
       const nextPriority = Math.max(0, ...group.destinations.map((row) => Number(row.priority))) + 10;
       await this.database.query(
         `insert into dispatcher (setid, destination, socket, state, weight, priority, attrs, description)
-         values (:setId, :destination, null, 0, 1, :priority, '', :description)`,
+         values (:setId, :destination, :socket, :state, 1, :priority, :attrs, :description)`,
         {
           setId: group.dispatcher_set_id,
           destination,
+          socket,
+          attrs,
+          state,
           priority: nextPriority,
           description: name.slice(0, 64),
         },
@@ -233,7 +278,7 @@ export class RoutingService {
         connection,
       );
       if (routes[0]) {
-        await this.upsertAddress(2, input.ip, input.port, routes[0].start_did, connection);
+        await this.upsertAddress(2, ip, port, routes[0].start_did, connection);
       }
     });
 

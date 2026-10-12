@@ -225,7 +225,18 @@ The installer preserves `backend/.env` on subsequent deployments, validates the 
 
 An application destination group may contain a primary server followed by one
 or more failover servers. Add them from the inbound-route editor using **Add
-failover server**. The backend stores later servers with increasing dispatcher
+failover server**. Select a saved application server from the dropdown, or
+choose **Add a new server…** to enter its name, IP, and SIP port. The dropdown
+shows individual servers from clean application destination groups, excludes
+servers already in the selected group, and never offers provider-trunk groups.
+Selecting a saved server adds only that server to the failover chain; its
+original group and routes are not moved or modified. Existing socket, attributes,
+and administrative state are preserved. Newly entered servers are saved as
+members of this group and can subsequently be selected from other groups.
+Adding a failover updates every inbound route using the target group, not just
+the route currently being edited.
+
+The backend stores later servers with increasing dispatcher
 priority and reloads the dispatcher automatically.
 
 The production `opensips.cfg` is intentionally ignored by Git. Apply the two

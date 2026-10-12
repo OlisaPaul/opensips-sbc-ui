@@ -3,6 +3,7 @@ import {
   Download, Headphones, Network, Plus, Power, RadioTower, RefreshCw, Save, Search, Server, X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { failoverServerOptions } from './routing/failover-servers';
 import {
   api, ApplicationDestination, ApplicationDestinationInput, ApplicationDestinationMemberInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
   ProviderDispatcherSets, Recording, Trunk, TrunkInput, TrunkStatus,
@@ -394,6 +395,8 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
   const [showNewDestination, setShowNewDestination] = useState(!destinations.length);
   const [newDestination, setNewDestination] = useState<ApplicationDestinationInput>({ name: '', ip: '', port: 5060 });
   const [showFailover, setShowFailover] = useState(false);
+  const [failoverMode, setFailoverMode] = useState<'existing' | 'new'>('existing');
+  const [existingFailoverId, setExistingFailoverId] = useState(0);
   const [newFailover, setNewFailover] = useState<ApplicationDestinationMemberInput>({ name: '', ip: '', port: 5060 });
   const [busy, setBusy] = useState(false);
   const [destinationBusy, setDestinationBusy] = useState(false);
@@ -401,6 +404,8 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
   const [destinationsBusy, setDestinationsBusy] = useState(false);
   const [error, setError] = useState('');
   const selectedDestination = availableDestinations.find((item) => item.id === form.destinationGroupId);
+  const failoverServers = useMemo(() => failoverServerOptions(availableDestinations, selectedDestination), [availableDestinations, selectedDestination]);
+  const selectedFailover = failoverServers.find((server) => server.id === existingFailoverId);
 
   const refreshDestinations = useCallback(async () => {
     setDestinationsBusy(true); setError('');
@@ -432,14 +437,17 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
     finally { setDestinationBusy(false); }
   };
   const addFailover = async () => {
-    if (!selectedDestination) return;
+    if (!selectedDestination || (failoverMode === 'existing' && !selectedFailover)) return;
     setFailoverBusy(true); setError('');
     try {
-      const result = await api.addApplicationDestinationFailover(selectedDestination.id, newFailover);
+      const input = failoverMode === 'existing' ? { existingDestinationId: selectedFailover!.id } : newFailover;
+      const result = await api.addApplicationDestinationFailover(selectedDestination.id, input);
       const updated = result.destination;
       setAvailableDestinations((current) => [...current.filter((item) => item.id !== updated.id), updated].sort((a, b) => a.name.localeCompare(b.name)));
       onDestinationCreated(updated);
       setShowFailover(false);
+      setExistingFailoverId(0);
+      setFailoverMode('existing');
       setNewFailover({ name: '', ip: '', port: 5060 });
     } catch (cause) { setError(errorText(cause)); }
     finally { setFailoverBusy(false); }
@@ -453,14 +461,14 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
-  return <Drawer title={route ? 'Edit inbound route' : 'Add inbound route'} description="Choose the provider, DID range, and named application destination. Dispatcher IDs are managed automatically." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
+  return <Drawer title={route ? 'Edit inbound route' : 'Add inbound route'} description="Choose the provider, DID range, and named application destination. Dispatcher IDs are managed automatically." busy={busy || failoverBusy || destinationBusy} error={error} onClose={onClose} onSubmit={submit}>
     {!trunks.length && <div className="toast error">Add a trunk before creating a route.</div>}
     <FormSection title="Incoming call">
       <div className="twoCols"><Field label="Start DID"><input required value={form.startDid} onChange={(e) => setForm({ ...form, startDid: e.target.value })} placeholder="+2348139856030" /></Field><Field label="End DID (optional)"><input value={form.endDid ?? ''} onChange={(e) => setForm({ ...form, endDid: e.target.value })} placeholder="Same as start DID" /></Field></div>
       <Field label="Incoming provider trunk"><select required value={form.trunkId} onChange={(e) => setForm({ ...form, trunkId: Number(e.target.value) })}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.provider_ip}</option>)}</select></Field>
     </FormSection>
     <FormSection title="Destination application">
-      <Field label="Destination server or group" hint="Only application destinations are shown; provider groups cannot be selected."><select required value={form.destinationGroupId} onChange={(e) => setForm({ ...form, destinationGroupId: Number(e.target.value) })}><option value={0}>Select a destination</option>{availableDestinations.map((item) => <option key={item.id} value={item.id} disabled={Boolean(item.conflicts.length)}>{applicationDestinationLabel(item)}{item.conflicts.length ? ' — needs cleanup' : ''}</option>)}</select></Field>
+      <Field label="Destination server or group" hint="Only application destinations are shown; provider groups cannot be selected."><select required disabled={failoverBusy || destinationBusy} value={form.destinationGroupId} onChange={(e) => { setForm({ ...form, destinationGroupId: Number(e.target.value) }); setExistingFailoverId(0); setShowFailover(false); }}><option value={0}>Select a destination</option>{availableDestinations.map((item) => <option key={item.id} value={item.id} disabled={Boolean(item.conflicts.length)}>{applicationDestinationLabel(item)}{item.conflicts.length ? ' — needs cleanup' : ''}</option>)}</select></Field>
       {selectedDestination && <div className={selectedDestination.conflicts.length ? 'setPreview destinationConflict' : 'setPreview'}><b>{selectedDestination.name}</b><div className="destinationMembers">{selectedDestination.destinations.map((item, index) => <span key={item.id}><i>{index === 0 ? 'Primary' : `Failover ${index}`}</i>{item.description || item.destination.replace(/^sip:/, '')}<small>{item.destination.replace(/^sip:/, '')}</small></span>)}</div><small>{selectedDestination.routeCount} inbound route{selectedDestination.routeCount === 1 ? '' : 's'} use this destination</small>{selectedDestination.conflicts.map((conflict) => <small className="conflictText" key={conflict}>{conflict}</small>)}</div>}
       <div className="destinationActions">
         <button className="addInline" type="button" disabled={destinationsBusy} onClick={() => void refreshDestinations()}><RefreshCw className={destinationsBusy ? 'spin' : ''} size={16} />{destinationsBusy ? 'Refreshing…' : 'Refresh list'}</button>
@@ -468,7 +476,26 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
         <button className="addInline" type="button" disabled={!selectedDestination || Boolean(selectedDestination.conflicts.length)} onClick={() => { setShowFailover((value) => !value); setShowNewDestination(false); }}><Plus size={16} />{showFailover ? 'Cancel failover' : 'Add failover server'}</button>
       </div>
       {showNewDestination && <div className="newDestination"><Field label="Friendly name"><input value={newDestination.name} onChange={(e) => setNewDestination({ ...newDestination, name: e.target.value })} placeholder="Voice1" /></Field><div className="twoCols"><Field label="Server IP"><input value={newDestination.ip} onChange={(e) => setNewDestination({ ...newDestination, ip: e.target.value })} placeholder="10.82.1.12" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newDestination.port} onChange={(e) => setNewDestination({ ...newDestination, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={destinationBusy || !newDestination.name || !newDestination.ip} onClick={() => void createDestination()}>{destinationBusy ? 'Creating…' : 'Create and select destination'}</button></div>}
-      {showFailover && selectedDestination && <div className="newDestination"><div className="setNotice">Calls try <b>{selectedDestination.destinations[0]?.description || selectedDestination.destinations[0]?.destination}</b> first. This server is tried only when the earlier destinations time out or return a server-unavailable response.</div><Field label="Failover server name"><input value={newFailover.name} onChange={(e) => setNewFailover({ ...newFailover, name: e.target.value })} placeholder="DR Server" /></Field><div className="twoCols"><Field label="Server IP"><input value={newFailover.ip} onChange={(e) => setNewFailover({ ...newFailover, ip: e.target.value })} placeholder="10.3.0.150" /></Field><Field label="SIP port"><input type="number" min="1" max="65535" value={newFailover.port} onChange={(e) => setNewFailover({ ...newFailover, port: Number(e.target.value) })} /></Field></div><button type="button" className="primary" disabled={failoverBusy || !newFailover.name || !newFailover.ip} onClick={() => void addFailover()}>{failoverBusy ? 'Adding…' : 'Add as next failover'}</button></div>}
+      {showFailover && selectedDestination && <div className="newDestination">
+        <div className="setNotice">Calls try <b>{selectedDestination.destinations[0]?.description || selectedDestination.destinations[0]?.destination}</b> first. The selected server is appended after the existing servers and is tried only when earlier destinations are unavailable. This updates all {selectedDestination.routeCount} inbound routes using this group.</div>
+        <Field label="Failover server" hint="Select a saved application server, or add a new one. Servers already in this group are excluded.">
+          <select disabled={failoverBusy} value={failoverMode === 'new' ? 'new' : selectedFailover?.id ?? 0} onChange={(e) => {
+            if (e.target.value === 'new') { setFailoverMode('new'); setExistingFailoverId(0); }
+            else { setFailoverMode('existing'); setExistingFailoverId(Number(e.target.value)); }
+          }}>
+            <option value={0}>Select an existing server</option>
+            {failoverServers.map((server) => <option key={server.id} value={server.id}>{server.name} — {server.destination.replace(/^sip:/, '')}{server.state !== 0 ? ' — currently unavailable' : ''}</option>)}
+            <option value="new">+ Add a new server…</option>
+          </select>
+        </Field>
+        {failoverMode === 'existing' && selectedFailover && <div className="setPreview"><b>{selectedFailover.name}</b><span>{selectedFailover.destination}</span><small>Saved in {selectedFailover.groupName}. Its existing group remains unchanged; only this server is added as the next fallback.</small>{selectedFailover.state !== 0 && <small className="conflictText">This server is currently marked unavailable. Its dispatcher state will be preserved; it will not be enabled automatically.</small>}</div>}
+        {failoverMode === 'existing' && !failoverServers.length && <div className="setNotice">No other saved application servers are available. Choose “Add a new server…” above, or refresh the list after adding one elsewhere.</div>}
+        {failoverMode === 'new' && <>
+          <Field label="Failover server name"><input disabled={failoverBusy} maxLength={64} value={newFailover.name} onChange={(e) => setNewFailover({ ...newFailover, name: e.target.value })} placeholder="DR Server" /></Field>
+          <div className="twoCols"><Field label="Server IP"><input disabled={failoverBusy} value={newFailover.ip} onChange={(e) => setNewFailover({ ...newFailover, ip: e.target.value })} placeholder="10.3.0.150" /></Field><Field label="SIP port"><input disabled={failoverBusy} type="number" min="1" max="65535" value={newFailover.port} onChange={(e) => setNewFailover({ ...newFailover, port: Number(e.target.value) })} /></Field></div>
+        </>}
+        <button type="button" className="primary" disabled={failoverBusy || (failoverMode === 'existing' ? !selectedFailover : newFailover.name.trim().length < 2 || !newFailover.ip.trim() || !Number.isInteger(newFailover.port) || newFailover.port < 1 || newFailover.port > 65535)} onClick={() => void addFailover()}>{failoverBusy ? 'Adding…' : failoverMode === 'new' ? 'Create and add as next failover' : 'Add selected server as next failover'}</button>
+      </div>}
     </FormSection>
     <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
   </Drawer>;

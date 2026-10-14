@@ -52,6 +52,7 @@ type OutboundRow = RowDataPacket & {
   description: string;
   routing_mode: string;
   strip_prefix: number;
+  add_prefix: string | null;
 };
 
 type AddressRow = RowDataPacket & {
@@ -413,6 +414,7 @@ export class RoutingService {
       return {
         ...route,
         strip_prefix: Boolean(route.strip_prefix),
+        add_prefix: route.add_prefix ?? null,
         trunk_id: trunk?.id ?? null,
         trunk_name: trunk?.name ?? route.description ?? 'Unassigned',
         provider_destination: destination?.destination ?? null,
@@ -432,8 +434,8 @@ export class RoutingService {
       const trunk = await this.findTrunk(input.trunkId, connection);
       await this.ensurePrefixAvailable(input.prefix, connection);
       const result = await this.database.query<ResultSetHeader>(
-        `insert into prefix_mapping (prefix, sipline_set_id, description, routing_mode, strip_prefix)
-         values (:prefix, :setId, :description, :routingMode, :stripPrefix)`,
+        `insert into prefix_mapping (prefix, sipline_set_id, description, routing_mode, strip_prefix, add_prefix)
+         values (:prefix, :setId, :description, :routingMode, :stripPrefix, :addPrefix)`,
         this.outboundParams(input, trunk),
         connection,
       );
@@ -454,7 +456,7 @@ export class RoutingService {
       await this.database.query(
         `update prefix_mapping
          set prefix = :prefix, sipline_set_id = :setId, description = :description,
-             routing_mode = :routingMode, strip_prefix = :stripPrefix
+             routing_mode = :routingMode, strip_prefix = :stripPrefix, add_prefix = :addPrefix
          where id = :id`,
         { id, ...this.outboundParams(input, trunk) },
         connection,
@@ -679,6 +681,7 @@ export class RoutingService {
       description: (input.description?.trim() || trunk.name).slice(0, 64),
       routingMode: input.routingMode ?? 'dial_prefix',
       stripPrefix: input.stripPrefix ? 1 : 0,
+      addPrefix: input.addPrefix?.trim() || null,
     };
   }
 

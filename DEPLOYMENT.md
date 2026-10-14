@@ -68,6 +68,33 @@ sudo mysql opensips < database/migrations/005_trunk_recording.sql
 All existing trunks default to recording disabled. The UI setting affects new
 calls only.
 
+### Optional outbound number prepending
+
+Outbound routes now have **Prepend digits (optional)**, for example `+234`.
+Apply the explicit additive migration before deploying the new backend:
+
+```bash
+sudo mysql opensips < database/migrations/006_outbound_add_prefix.sql
+```
+
+Unlike migrations 001-005, this adds a nullable column to the existing custom
+`prefix_mapping` table, not to an app-owned `sbc_*` table. It preserves all rows;
+existing routes default to adding nothing. It is also required on fresh installs
+because the custom routing tables are provisioned separately.
+
+The UI/API update alone does not rewrite SIP numbers. Apply the two production
+config edits in `deploy/opensips-outbound-number-snippets.md`, validate OpenSIPS,
+and restart it only in a maintenance window with no active calls. The snippets
+honor `strip_prefix` and then apply `add_prefix`; they bypass old prefix caches
+and read the current rule once per initial call. Benchmark this extra database
+load. There is no Redis flush requirement for the new prefix-routing lookup.
+Caller-DID/no-prefix routing, inbound calls and caller identity are unchanged.
+
+Example: dial `1238012345678`, match prefix `123`, enable **Strip prefix**, and
+set **Prepend digits** to `+234`: the provider receives `+2348012345678`.
+Leaving the field blank (or clearing it) adds nothing. This does not implicitly
+remove a leading zero or replace a country code.
+
 ## RTPengine Recording Prerequisites
 
 The trunk switch makes OpenSIPS send `record-call=yes` on the initial RTPengine

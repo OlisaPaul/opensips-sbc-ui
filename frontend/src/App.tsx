@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { failoverServerOptions } from './routing/failover-servers';
+import { outboundNumber } from './routing/outbound-number';
 import {
   api, ApplicationDestination, ApplicationDestinationInput, ApplicationDestinationMemberInput, InboundRoute, InboundRouteInput, OutboundRoute, OutboundRouteInput,
   ProviderDispatcherSets, Recording, Trunk, TrunkInput, TrunkStatus,
@@ -25,7 +26,7 @@ const newInbound = (trunks: Trunk[], destinations: ApplicationDestination[]): In
 
 const newOutbound = (trunks: Trunk[]): OutboundRouteInput => ({
   prefix: '', trunkId: trunks[0]?.id ?? 0, pilotCli: trunks[0]?.username ?? '',
-  stripPrefix: true, routingMode: 'dial_prefix', description: '',
+  stripPrefix: true, addPrefix: '', routingMode: 'dial_prefix', description: '',
 });
 
 function trunkInput(trunk: Trunk): TrunkInput {
@@ -282,7 +283,7 @@ function OutboundList({ rows, selected, onSelect, onEdit }: { rows: OutboundRout
   if (!rows.length) return <Empty text="Add an outbound prefix and select the trunk that should carry it." />;
   return <div className="contentGrid"><div className="dataPanel"><div className="tableHead outboundHead"><span>Dial prefix</span><span>Provider trunk</span><span>Routing</span><span /></div>{rows.map((route) => <button className={`dataRow outboundRow ${selected === route.id ? 'selected' : ''}`} key={route.id} onClick={() => onSelect(route.id)}>
     <span className="prefixBadge">{route.prefix}</span><span className="primaryCell"><b>{route.trunk_name}</b><small>{route.provider_destination ?? `Set ${route.sipline_set_id}`}</small></span>
-    <span><b>{route.strip_prefix ? 'Strip prefix' : 'Keep prefix'}</b><small>{route.routing_mode.replace('_', ' ')}</small></span><ChevronRight size={18} />
+    <span><b>{route.strip_prefix ? 'Strip prefix' : 'Keep prefix'}</b><small>{route.add_prefix ? `Prepend ${route.add_prefix}` : 'No digits prepended'}</small></span><ChevronRight size={18} />
   </button>)}</div>{selected && <OutboundDetail route={rows.find((row) => row.id === selected)!} onEdit={() => onEdit(selected)} />}</div>;
 }
 
@@ -290,7 +291,7 @@ function OutboundDetail({ route, onEdit }: { route: OutboundRoute; onEdit: () =>
   return <Detail title={route.prefix} subtitle="Outbound dial prefix" onEdit={onEdit}>
     <DetailRow label="Provider trunk" value={route.trunk_name} /><DetailRow label="Provider destination" value={route.provider_destination ?? 'Not provisioned'} />
     <DetailRow label="Provider set" value={route.sipline_set_id} /><DetailRow label="Pilot CLI" value={route.pilot_cli ?? '—'} />
-    <DetailRow label="Prefix handling" value={route.strip_prefix ? 'Strip before sending' : 'Keep in called number'} /><DetailRow label="Description" value={route.description || '—'} />
+    <DetailRow label="Prefix handling" value={route.strip_prefix ? 'Strip before sending' : 'Keep in called number'} /><DetailRow label="Prepend digits" value={route.add_prefix || 'None'} /><DetailRow label="Description" value={route.description || '—'} />
   </Detail>;
 }
 
@@ -502,13 +503,20 @@ function InboundEditor({ route, trunks, destinations, onDestinationsLoaded, onDe
 }
 
 function OutboundEditor({ route, trunks, onClose, onSaved }: { route?: OutboundRoute; trunks: Trunk[]; onClose: () => void; onSaved: (text: string) => Promise<void> }) {
-  const initial = useMemo<OutboundRouteInput>(() => route ? { prefix: route.prefix, trunkId: route.trunk_id ?? trunks[0]?.id ?? 0, pilotCli: route.pilot_cli ?? trunks.find((item) => item.id === route.trunk_id)?.username ?? '', stripPrefix: route.strip_prefix, routingMode: 'dial_prefix', description: route.description ?? '' } : newOutbound(trunks), [route, trunks]);
+  const initial = useMemo<OutboundRouteInput>(() => route ? { prefix: route.prefix, trunkId: route.trunk_id ?? trunks[0]?.id ?? 0, pilotCli: route.pilot_cli ?? trunks.find((item) => item.id === route.trunk_id)?.username ?? '', stripPrefix: route.strip_prefix, addPrefix: route.add_prefix ?? '', routingMode: 'dial_prefix', description: route.description ?? '' } : newOutbound(trunks), [route, trunks]);
   const [form, setForm] = useState(initial); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [example, setExample] = useState('');
+  const exampleDialed = example || `${form.prefix}8012345678`;
+  const exampleSent = outboundNumber(exampleDialed, form.prefix, form.stripPrefix, form.addPrefix?.trim() || '');
   const pickTrunk = (id: number) => setForm({ ...form, trunkId: id, pilotCli: trunks.find((item) => item.id === id)?.username ?? form.pilotCli });
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { route ? await api.updateOutboundRoute(route.id, form) : await api.createOutboundRoute(form); await onSaved(route ? 'Outbound route updated.' : 'Outbound route added.'); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
   return <Drawer title={route ? 'Edit outbound route' : 'Add outbound route'} description="Choose the access prefix and the provider trunk that will carry the call." busy={busy} error={error} onClose={onClose} onSubmit={submit}>
     {!trunks.length && <div className="toast error">Add a trunk before creating a route.</div>}
-    <FormSection title="Dial rule"><Field label="Dial prefix" hint="Digits users dial before the destination number"><input required value={form.prefix} onChange={(e) => setForm({ ...form, prefix: e.target.value })} placeholder="999" /></Field><label className="switchRow"><span><b>Strip prefix</b><small>Remove the access prefix before sending the call</small></span><input type="checkbox" checked={form.stripPrefix} onChange={(e) => setForm({ ...form, stripPrefix: e.target.checked })} /></label></FormSection>
+    <FormSection title="Dial rule"><Field label="Dial prefix" hint="Digits users dial before the destination number"><input required value={form.prefix} onChange={(e) => setForm({ ...form, prefix: e.target.value })} placeholder="999" /></Field><label className="switchRow"><span><b>Strip prefix</b><small>Remove the access prefix before sending the call</small></span><input type="checkbox" checked={form.stripPrefix} onChange={(e) => setForm({ ...form, stripPrefix: e.target.checked })} /></label>
+      <Field label="Prepend digits (optional)" hint="Added after stripping the dial prefix, if enabled. Blank adds nothing. Does not remove a leading 0 or an existing country code."><input value={form.addPrefix ?? ''} maxLength={32} pattern="[+]?[0-9]*" onChange={(e) => setForm({ ...form, addPrefix: e.target.value })} placeholder="+234" /></Field>
+      <Field label="Example dialed number" hint="Preview only; this number is not saved."><input value={example} onChange={(e) => setExample(e.target.value)} placeholder={`${form.prefix}8012345678`} /></Field>
+      <p aria-live="polite">{exampleSent === null ? 'Enter a number starting with the dial prefix to preview this rule.' : `Sent to provider: ${exampleSent}`}</p>
+    </FormSection>
     <FormSection title="Provider"><Field label="Outbound trunk"><select required value={form.trunkId} onChange={(e) => pickTrunk(Number(e.target.value))}><option value={0}>Select a trunk</option>{trunks.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.provider_ip}</option>)}</select></Field><Field label="Pilot CLI" hint="Caller ID authorized for this provider"><input required value={form.pilotCli} onChange={(e) => setForm({ ...form, pilotCli: e.target.value })} /></Field></FormSection>
     <FormSection title="Notes"><Field label="Description (optional)"><input value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field></FormSection>
   </Drawer>;

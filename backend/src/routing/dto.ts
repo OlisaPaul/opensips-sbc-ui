@@ -1,4 +1,5 @@
 import { IsBoolean, IsIn, IsInt, IsIP, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class InboundRouteInputDto {
   @IsString()
@@ -82,6 +83,13 @@ export class OutboundRouteInputDto {
 
   @IsBoolean()
   stripPrefix!: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(32)
+  @Matches(/^\+?[0-9]*$/, { message: 'addPrefix must contain only digits with an optional leading +' })
+  addPrefix?: string | null;
 
   @IsOptional()
   @IsIn(['dial_prefix'])

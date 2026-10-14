@@ -129,6 +129,7 @@ export type OutboundRoute = {
   description: string;
   routing_mode: string;
   strip_prefix: boolean;
+  add_prefix: string | null;
   trunk_id: number | null;
   trunk_name: string;
   provider_destination: string | null;
@@ -140,6 +141,7 @@ export type OutboundRouteInput = {
   trunkId: number;
   pilotCli: string;
   stripPrefix: boolean;
+  addPrefix?: string | null;
   routingMode?: 'dial_prefix';
   description?: string;
 };

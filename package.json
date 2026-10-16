@@ -14,6 +14,7 @@
     "lint": "npm run lint --workspace backend && npm run lint --workspace frontend",
     "test:dtmf": "node --test monitoring/dtmf/analyzer.test.mjs",
     "test:failover": "npm run build --workspace backend && node --test backend/test/failover.test.cjs",
-    "test:outbound": "npm run build --workspace backend && node --test backend/test/outbound-number.test.cjs"
+    "test:outbound": "npm run build --workspace backend && node --test backend/test/outbound-number.test.cjs",
+    "test:nginx": "node --test scripts/nginx-config.test.cjs"
   }
 }

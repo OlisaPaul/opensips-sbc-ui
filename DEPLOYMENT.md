@@ -348,6 +348,23 @@ sudo DOMAIN=sbc.example.com \
 
 Nginx listens on ports `80` and `443`. The NestJS backend listens only on localhost at `BACKEND_PORT`.
 
+## Optional Homer 11 on the same HTTPS server
+
+For an existing Homer service listening on `127.0.0.1:8080`, see
+[`deploy/nginx/HOMER.md`](deploy/nginx/HOMER.md). Install the opt-in
+`deploy/nginx/homer.locations.conf.example` as
+`/etc/nginx/opensips-sbc-ui.d/homer.conf`. The HTTPS template now includes that
+directory, and deployments preserve its contents outside the application folder.
+For an already generated site, add the documented include inside the HTTPS
+server once, validate with `nginx -t`, then reload Nginx (no SIP-service restart).
+Do not put bare location fragments directly in `/etc/nginx/conf.d/`.
+
+The fragment handles `/homer/`, Homer `/api/v4/`, logos and root-relative lazy
+assets without disabling Basic Auth on the SBC root, API or existing SBC assets.
+Homer retains its own login. Shared-origin paths can collide; check the guide's
+scope and tests, and prefer a separate hostname where available. Homer is not
+installed or automatically exposed by the SBC deployment script.
+
 ## Database Preflight
 
 Before applying the schema or saving trunks, check that the expected OpenSIPS/custom tables exist:

@@ -1,0 +1,87 @@
+# Opt-in server-context fragment; do NOT put directly in /etc/nginx/conf.d/.
+# Copy to /etc/nginx/opensips-sbc-ui.d/homer.conf and include from the SBC HTTPS server.
+# Homer owns authentication on its own routes. SBC / and /api/ retain Basic Auth.
+# This example targets the observed Homer 11 UI/API on localhost:8080.
+
+location = /homer {
+    auth_basic off;
+    return 301 /homer/;
+}
+
+location ^~ /homer/ {
+    auth_basic off;
+    proxy_pass http://127.0.0.1:8080/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /homer;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    proxy_set_header Accept-Encoding "";
+    # text/html is already the default sub_filter type; do not add it a second time.
+    sub_filter_once off;
+    sub_filter '="/assets/' '="/homer/assets/';
+    sub_filter 'base href="/"' 'base href="/homer/"';
+    proxy_redirect default;
+    proxy_redirect / /homer/;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+
+# Homer lazy imports can still request /assets/... after sign-in.
+# Existing SBC assets retain the enclosing server's Basic Auth. Only paths that
+# are NOT SBC files are internally rerouted to Homer BEFORE the access phase.
+# Do not set auth_basic off here and do not proxy all /assets/ requests to Homer.
+location ^~ /assets/ {
+    if (!-f $request_filename) {
+        rewrite ^ /homer$uri last;
+    }
+    try_files $uri =404;
+}
+
+location = /logo.png {
+    auth_basic off;
+    rewrite ^ /homer/logo.png last;
+}
+
+location = /favicon.ico {
+    auth_basic off;
+    rewrite ^ /homer/favicon.ico last;
+}
+
+# Keep this more specific than the existing SBC /api/ location.
+# Preserve Authorization and Cookie headers: Homer needs its own login/session.
+location ^~ /api/v4/ {
+    auth_basic off;
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+}
+
+location ^~ /export/ {
+    auth_basic off;
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location ^~ /gamedata/ {
+    auth_basic off;
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}

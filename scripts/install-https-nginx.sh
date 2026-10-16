@@ -260,6 +260,10 @@ if [[ -n "$BASIC_AUTH_USER" && -n "$BASIC_AUTH_PASSWORD" ]]; then
     auth_basic_user_file /etc/nginx/.opensips-sbc-ui.htpasswd;'
 fi
 
+# Never overwrite site-local extensions when regenerating the main server block.
+# Keep this outside APP_DIR so rsync --delete during web deployment cannot remove it.
+install -d -o root -g root -m 755 /etc/nginx/opensips-sbc-ui.d
+
 tmp_nginx="$(mktemp)"
 sed "s#__DOMAIN__#$DOMAIN#g; s#__BACKEND_PORT__#$BACKEND_PORT#g; s#__APP_DIR__#$APP_DIR#g; s#__SSL_CERTIFICATE__#$certificate_path#g; s#__SSL_CERTIFICATE_KEY__#$certificate_key_path#g" \
   "$APP_DIR/deploy/nginx/opensips-sbc-ui.conf" > "$tmp_nginx"
